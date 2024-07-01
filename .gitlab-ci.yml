@@ -1,0 +1,34 @@
+# spell-checker:ignore udsdepend
+
+stages:
+  - build
+  - test
+  - lint
+  - spellcheck
+
+build:
+  stage: build
+  image: udsdepend/cp24-project-env
+  script:
+    - just build
+
+test:
+  stage: test
+  image: udsdepend/cp24-project-env
+  script:
+    - just test
+  allow_failure: true # change this to false once you pass the tests
+
+lint:
+  stage: lint
+  image: udsdepend/cp24-project-env
+  script:
+    - just lint
+
+spellcheck:
+  stage: spellcheck
+  image: udsdepend/cspell
+  needs: []
+  script:
+    - cspell --quiet --unique --gitignore --dot '**'
+  allow_failure: true

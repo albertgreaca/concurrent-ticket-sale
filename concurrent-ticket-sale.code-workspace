@@ -1,0 +1,48 @@
+{
+  "folders": [
+    {
+      "name": "Concurrent Ticket Sale",
+      "path": "."
+    },
+  ],
+  "extensions": {
+    "recommendations": [
+      // Rust language support
+      "rust-lang.rust-analyzer",
+      // Rust debugger
+      "vadimcn.vscode-lldb",
+      // Java language support
+      "vscjava.vscode-java-pack",
+      // Interfacing with Gradle
+      "richardwillis.vscode-gradle-extension-pack",
+    ]
+  },
+  "settings": {
+    "editor.formatOnSave": true,
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "rust-analyzer.check.command": "clippy",
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "type": "lldb",
+        "request": "launch",
+        "name": "Debug Rust implementation",
+        "cargo": {
+          "args": [
+            "build",
+            "--bin=ticket-sale-server",
+            "--package=ticket-sale-server"
+          ],
+          "filter": {
+            "name": "ticket-sale-server",
+            "kind": "bin"
+          }
+        },
+        "args": [],
+        "cwd": "${workspaceFolder}"
+      },
+    ],
+  }
+}

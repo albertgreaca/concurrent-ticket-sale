@@ -1,0 +1,23 @@
+[package]
+name = "ticket-sale-tests"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.18", features = ["rt", "time", "macros", "sync"] }
+futures = "0.3"
+flume = "0.11.0"
+parking_lot = "0.12"
+eyre = "0.6.12"
+tracing = "0.1"
+thiserror = "1.0"
+uuid = { version = "1", features = ["v4"] }
+nanorand = "0.7.0"
+jni = { version = "0.21.1", features = ["invocation"] }
+trait-variant = "0.1.2"
+sptr = "0.3.2"
+toml = "0.8.14"
+serde = { version = "1.0.203", features = ["derive"] }
+ntest = "0.9.3"
+ticket-sale-core.workspace = true
+ticket-sale-rocket.workspace = true

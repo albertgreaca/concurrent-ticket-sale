@@ -1,0 +1,27 @@
+# build artifacts
+/target
+/.gradle
+/build
+/bin
+/out
+/target
+
+# IntelliJ
+.idea
+
+# Eclipse
+.classpath
+.project
+.settings/*
+!.settings/org.eclipse.jdt.core.prefs
+
+# VS Code
+.vscode
+!.vscode/launch.json
+
+# CSpell
+.cspellcache
+
+# Perf
+perf.data
+perf.data.old

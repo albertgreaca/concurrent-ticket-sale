@@ -1,0 +1,53 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group 'com.pseuco.cp24'
+version '0.1.0'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'com.beust:jcommander:1.82'
+
+    testImplementation 'junit:junit:4.13.2'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+}
+
+run {
+    enableAssertions = true
+}
+
+javadoc {
+    options.encoding = 'UTF-8'
+}
+
+jar {
+    archiveFileName = 'cli.jar'
+    destinationDirectory = file("$rootDir/out")
+    compileJava.options.encoding = 'UTF-8'
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    manifest {
+        attributes('Main-Class': 'com.pseuco.cp24.Cli')
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}
+
+application {
+    mainClass = 'com.pseuco.cp24.Cli'
+}
+
+test {
+    enableAssertions = true
+    if (project.hasProperty('excludeTests')) {
+        exclude project.property('excludeTests')
+    }
+}

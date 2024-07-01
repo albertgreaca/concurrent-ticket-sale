@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.dependencies]
+ticket-sale-rocket = { version = "0.1", path = "crates/ticket-sale-rocket" }
+ticket-sale-core = { version = "0.1", path = "crates/ticket-sale-core" }

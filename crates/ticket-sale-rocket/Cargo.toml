@@ -1,0 +1,12 @@
+[package]
+name = "ticket-sale-rocket"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+parking_lot = "0.12.3"
+uuid = { version = "1", features = ["v4"] }
+rand = "0.8.5"
+ticket-sale-core.workspace = true
