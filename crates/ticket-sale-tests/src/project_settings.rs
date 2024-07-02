@@ -22,6 +22,7 @@ pub struct ProjectSettings {
     #[serde(default)]
     pub test_bonus: bool,
 
+    #[serde(default)]
     pub java: JavaSettings,
 }
 
@@ -32,7 +33,7 @@ pub enum ProgrammingLanguage {
     Java,
 }
 
-#[derive(Clone, Deserialize, Debug)]
+#[derive(Clone, Deserialize, Default, Debug)]
 #[serde(rename_all = "kebab-case")]
 pub struct JavaSettings {
     #[serde(default)]
