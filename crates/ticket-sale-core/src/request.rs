@@ -11,7 +11,11 @@ pub enum RequestKind {
     /// 📌 Hint: Should be processed by the load balancer.
     GetNumServers,
 
-    /// Retrieve the number of servers for on-demand scaling
+    /// Scale the ticket sales system to the provided number of servers
+    ///
+    /// The response to this request includes the number of servers after the
+    /// scaling is done (i.e., it should be the equal to the requested number of
+    /// servers).
     ///
     /// 📌 Hint: Should be processed by the load balancer.
     SetNumServers,
