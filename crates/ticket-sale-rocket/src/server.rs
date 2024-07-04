@@ -62,6 +62,7 @@ impl Server {
                 rq.respond_with_int(self.get_available_tickets());
             }
             RequestKind::ReserveTicket => {
+                assert!(self.status != 1, "wrong server");
                 rq.set_server_id(self.id);
                 let bloke = rq.customer_id();
                 if self.reserved.contains_key(&bloke) {
