@@ -67,6 +67,10 @@ impl RequestHandler for Balancer {
                     Some(n) => n,
                     None => {
                         let guard = self.coordinator.lock().unwrap();
+                        if guard.no_active_servers == 0 {
+                            rq.respond_with_err("no server available");
+                            return;
+                        }
                         let x = guard.get_random_server();
                         rq.set_server_id(x);
                         x
@@ -79,6 +83,10 @@ impl RequestHandler for Balancer {
                 {
                     server.handle_request(rq);
                 } else {
+                    if guard.no_active_servers == 0 {
+                        rq.respond_with_err("no server available");
+                        return;
+                    }
                     let x = guard.get_random_server();
                     rq.set_server_id(x);
                     rq.respond_with_err("server terminating");

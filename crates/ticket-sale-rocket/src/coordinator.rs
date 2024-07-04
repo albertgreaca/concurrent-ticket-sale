@@ -18,7 +18,7 @@ pub struct Coordinator {
     database: Arc<Mutex<Database>>,
     server_list: Vec<Server>,
     server_id_list: Vec<Uuid>,
-    no_active_servers: u32,
+    pub no_active_servers: u32,
 }
 
 impl Coordinator {
