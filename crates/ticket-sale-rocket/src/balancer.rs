@@ -81,8 +81,9 @@ impl RequestHandler for Balancer {
                 } else {
                     let x = guard.get_random_server();
                     rq.set_server_id(x);
-                    let server = guard.get_server_mut(x);
-                    server.handle_request(rq);
+                    rq.respond_with_err("server terminating");
+                    //let server = guard.get_server_mut(x);
+                    //server.handle_request(rq);
                 }
                 drop(guard);
             }
