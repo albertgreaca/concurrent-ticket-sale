@@ -87,9 +87,8 @@ impl Server {
                         rq.respond_with_sold_out();
                         return;
                     }
-                    let num_tickets = (self.database.lock().unwrap().get_num_available() as f64)
-                        .sqrt()
-                        .ceil() as u32;
+                    let num_tickets =
+                        (self.database.lock().unwrap().get_num_available() as f64).sqrt() as u32;
                     self.tickets
                         .extend(self.database.lock().unwrap().allocate(num_tickets));
                 }
@@ -109,7 +108,6 @@ impl Server {
                         if self.reserved[&bloke].0 == ticket {
                             self.reserved.remove(&bloke);
                             self.bought.insert(bloke, ticket);
-                            rq.respond_with_int(ticket);
                             if self.reserved.is_empty() && self.status == 1 {
                                 self.database
                                     .lock()
@@ -118,6 +116,7 @@ impl Server {
                                 self.tickets.clear();
                                 self.status = 2;
                             }
+                            rq.respond_with_int(ticket);
                         } else {
                             rq.respond_with_err("you ain't got that shit")
                         }
@@ -142,7 +141,6 @@ impl Server {
                             } else {
                                 self.database.lock().unwrap().deallocate(&[ticket]);
                             }
-                            rq.respond_with_int(ticket);
                             if self.reserved.is_empty() && self.status == 1 {
                                 self.database
                                     .lock()
@@ -151,6 +149,7 @@ impl Server {
                                 self.tickets.clear();
                                 self.status = 2;
                             }
+                            rq.respond_with_int(ticket);
                         } else {
                             rq.respond_with_err("you ain't got that shit")
                         }
