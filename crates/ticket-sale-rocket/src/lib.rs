@@ -43,7 +43,7 @@ pub fn launch(config: &Config) -> Balancer {
         config.timeout,
         database.clone(),
     )));
-    coordinator.lock().unwrap().scale_to(1);
+    coordinator.lock().unwrap().scale_to(config.initial_servers);
     let estimator = Arc::new(Estimator::new(
         database.clone(),
         coordinator.clone(),
