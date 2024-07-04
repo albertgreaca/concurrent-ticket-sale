@@ -50,10 +50,10 @@ pub fn launch(config: &Config) -> Balancer {
         config.estimator_roundtrip_time,
     ));
     let estimator2 = estimator.clone();
-    let alyo = thread::spawn(move || {
+    let other_thread = thread::spawn(move || {
         while Arc::strong_count(&estimator2) > 1 {
             estimator2.run();
         }
     });
-    Balancer::new(coordinator.clone(), estimator, alyo)
+    Balancer::new(coordinator.clone(), estimator, other_thread)
 }

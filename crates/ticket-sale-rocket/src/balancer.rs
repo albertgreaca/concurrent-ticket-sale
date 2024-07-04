@@ -16,7 +16,7 @@ use super::estimator::Estimator;
 pub struct Balancer {
     coordinator: Arc<Mutex<Coordinator>>,
     estimator: Arc<Estimator>,
-    alyo: JoinHandle<()>,
+    other_thread: JoinHandle<()>,
 }
 
 impl Balancer {
@@ -24,12 +24,12 @@ impl Balancer {
     pub fn new(
         coordinator: Arc<Mutex<Coordinator>>,
         estimator: Arc<Estimator>,
-        alyo: JoinHandle<()>,
+        other_thread: JoinHandle<()>,
     ) -> Self {
         Self {
             coordinator,
             estimator,
-            alyo,
+            other_thread,
         }
     }
 }
@@ -91,6 +91,6 @@ impl RequestHandler for Balancer {
 
     fn shutdown(self) {
         drop(self.estimator);
-        self.alyo.join().unwrap();
+        self.other_thread.join().unwrap();
     }
 }
