@@ -48,7 +48,12 @@ impl Server {
     pub fn handle_request(&mut self, mut rq: Request) {
         self.reserved.retain(|_, (ticket, time)| {
             if time.elapsed().as_secs() > self.timeout as u64 {
-                self.tickets.push(*ticket);
+                if self.status == 0 {
+                    self.tickets.push(*ticket);
+                } else {
+                    let x = *ticket;
+                    self.database.lock().unwrap().deallocate(&[x]);
+                }
                 false
             } else {
                 true
@@ -106,6 +111,11 @@ impl Server {
                             self.bought.insert(bloke, ticket);
                             rq.respond_with_int(ticket);
                             if self.reserved.is_empty() && self.status == 1 {
+                                self.database
+                                    .lock()
+                                    .unwrap()
+                                    .deallocate(self.tickets.as_slice());
+                                self.tickets.clear();
                                 self.status = 2;
                             }
                         } else {
@@ -134,6 +144,11 @@ impl Server {
                             }
                             rq.respond_with_int(ticket);
                             if self.reserved.is_empty() && self.status == 1 {
+                                self.database
+                                    .lock()
+                                    .unwrap()
+                                    .deallocate(self.tickets.as_slice());
+                                self.tickets.clear();
                                 self.status = 2;
                             }
                         } else {
