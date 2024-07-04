@@ -1,6 +1,6 @@
 # This name will show up in the leader board of Mission Control
 # https://missioncontrol.pseuco.com/#/leaderboard
-team-name = "religious recital"
+team-name = "👀 Manchmal ist das Leben halt so..."
 
 # The programming language you use: either "java" or "rust"
 language = "rust"
@@ -13,3 +13,7 @@ bonus-implemented = false
 # regular version and the bonus if you set `bonus-implemented = true` above. The
 # `CP_BONUS` environment variable overrides this setting.
 test-bonus = false
+
+# Java-specific settings
+[java]
+#jar = "../concurrent-ticket-sale/out/cli.jar"

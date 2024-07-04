@@ -10,6 +10,10 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::thread;
+
 use estimator::Estimator;
 use ticket_sale_core::Config;
 
@@ -34,12 +38,22 @@ pub fn launch(config: &Config) -> Balancer {
         todo!("Bonus not implemented!")
     }
 
-    let database = Database::new(config.tickets);
-    let balancer = Balancer::new();
-    let coordinator = Coordinator::new(config.timeout, database);
-    let estimator = Estimator::new(todo!(), config.estimator_roundtrip_time);
-
-    todo!("Launch coordinator and estimator.");
-
-    balancer
+    let database = Arc::new(Mutex::new(Database::new(config.tickets)));
+    let coordinator = Arc::new(Mutex::new(Coordinator::new(
+        config.timeout,
+        database.clone(),
+    )));
+    coordinator.lock().unwrap().scale_to(1);
+    let estimator = Arc::new(Estimator::new(
+        database.clone(),
+        coordinator.clone(),
+        config.estimator_roundtrip_time,
+    ));
+    let estimator2 = estimator.clone();
+    let alyo = thread::spawn(move || {
+        while Arc::strong_count(&estimator2) > 1 {
+            estimator2.run();
+        }
+    });
+    Balancer::new(coordinator.clone(), estimator, alyo)
 }
