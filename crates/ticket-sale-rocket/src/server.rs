@@ -68,10 +68,10 @@ impl Server {
                     rq.respond_with_err("one reservation already present");
                     return;
                 }
-                if self.get_available_tickets() == 0 {
+                /*if self.get_available_tickets() == 0 {
                     rq.respond_with_sold_out();
                     return;
-                }
+                }*/
                 if self.tickets.is_empty() {
                     if self.database.lock().unwrap().get_num_available() == 0 {
                         rq.respond_with_sold_out();
