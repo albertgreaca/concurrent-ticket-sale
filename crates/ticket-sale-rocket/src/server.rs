@@ -55,6 +55,11 @@ impl Server {
             }
         });
         if self.reserved.is_empty() && self.status == 1 {
+            self.database
+                .lock()
+                .unwrap()
+                .deallocate(self.tickets.as_slice());
+            self.tickets.clear();
             self.status = 2;
         }
         match rq.kind() {
