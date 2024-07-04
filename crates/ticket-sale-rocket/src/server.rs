@@ -19,8 +19,8 @@ pub struct Server {
     database: Arc<Mutex<Database>>,
     status: u32,
     tickets: Vec<u32>,
-    reserved: HashMap<u32, (Uuid, Instant)>,
-    bought: HashMap<u32, Uuid>,
+    reserved: HashMap<Uuid, (u32, Instant)>,
+    bought: HashMap<Uuid, u32>,
     timeout: u32,
 }
 
@@ -46,7 +46,7 @@ impl Server {
 
     /// Handle a [`Request`]
     pub fn handle_request(&mut self, mut rq: Request) {
-        self.reserved.retain(|ticket, (_, time)| {
+        self.reserved.retain(|_, (ticket, time)| {
             if time.elapsed().as_secs() > self.timeout as u64 {
                 self.tickets.push(*ticket);
                 false
@@ -62,6 +62,12 @@ impl Server {
                 rq.respond_with_int(self.get_available_tickets());
             }
             RequestKind::ReserveTicket => {
+                rq.set_server_id(self.id);
+                let bloke = rq.customer_id();
+                if self.reserved.contains_key(&bloke) {
+                    rq.respond_with_err("one reservation already present");
+                    return;
+                }
                 if self.get_available_tickets() == 0 {
                     rq.respond_with_sold_out();
                     return;
@@ -77,22 +83,22 @@ impl Server {
                     self.tickets
                         .extend(self.database.lock().unwrap().allocate(num_tickets));
                 }
-                let bloke = rq.customer_id();
                 let ticket = self.tickets.pop().unwrap();
-                self.reserved.insert(ticket, (bloke, Instant::now()));
+                self.reserved.insert(bloke, (ticket, Instant::now()));
                 rq.respond_with_int(ticket);
             }
             RequestKind::BuyTicket => {
+                rq.set_server_id(self.id);
                 let ticket_option = rq.read_u32();
                 if ticket_option.is_none() {
                     rq.respond_with_err("no ticket");
                 } else {
                     let ticket = ticket_option.unwrap();
                     let bloke = rq.customer_id();
-                    if self.reserved.contains_key(&ticket) {
-                        if self.reserved[&ticket].0 == bloke {
-                            self.reserved.remove(&ticket);
-                            self.bought.insert(ticket, bloke);
+                    if self.reserved.contains_key(&bloke) {
+                        if self.reserved[&bloke].0 == ticket {
+                            self.reserved.remove(&bloke);
+                            self.bought.insert(bloke, ticket);
                             rq.respond_with_int(ticket);
                             if self.reserved.is_empty() && self.status == 1 {
                                 self.status = 2;
@@ -106,15 +112,16 @@ impl Server {
                 }
             }
             RequestKind::AbortPurchase => {
+                rq.set_server_id(self.id);
                 let ticket_option = rq.read_u32();
                 if ticket_option.is_none() {
                     rq.respond_with_err("no ticket");
                 } else {
                     let ticket = ticket_option.unwrap();
                     let bloke = rq.customer_id();
-                    if self.reserved.contains_key(&ticket) {
-                        if self.reserved[&ticket].0 == bloke {
-                            self.reserved.remove(&ticket);
+                    if self.reserved.contains_key(&bloke) {
+                        if self.reserved[&bloke].0 == ticket {
+                            self.reserved.remove(&bloke);
                             if self.status == 0 {
                                 self.tickets.push(ticket);
                             } else {
