@@ -1,4 +1,5 @@
 //! Implementation of the coordinator
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -18,6 +19,7 @@ pub struct Coordinator {
     database: Arc<Mutex<Database>>,
     server_list: Vec<Server>,
     server_id_list: Vec<Uuid>,
+    server_map_index: HashMap<Uuid, usize>,
     pub no_active_servers: u32,
 }
 
@@ -29,6 +31,7 @@ impl Coordinator {
             database,
             server_list: Vec::new(),
             server_id_list: Vec::new(),
+            server_map_index: HashMap::new(),
             no_active_servers: 0,
         }
     }
@@ -56,6 +59,8 @@ impl Coordinator {
                 self.server_list.push(server);
                 self.server_id_list.push(server_id);
                 self.server_list[self.no_active_servers as usize].activate();
+                self.server_map_index
+                    .insert(server_id, self.no_active_servers as usize);
                 self.no_active_servers += 1;
             }
         }
@@ -85,22 +90,18 @@ impl Coordinator {
     }
 
     pub fn get_server(&self, id: Uuid) -> &Server {
-        for i in 0..(self.server_list.len()) {
-            if self.server_list[i].get_id() == id {
-                return &self.server_list[i];
-            }
+        if self.server_map_index.contains_key(&id) {
+            &self.server_list[self.server_map_index[&id]]
+        } else {
+            &self.server_list[0]
         }
-        println!("Error server not found");
-        &self.server_list[0]
     }
 
     pub fn get_server_mut(&mut self, id: Uuid) -> &mut Server {
-        for i in 0..(self.server_list.len()) {
-            if self.server_list[i].get_id() == id {
-                return &mut self.server_list[i];
-            }
+        if self.server_map_index.contains_key(&id) {
+            &mut self.server_list[self.server_map_index[&id]]
+        } else {
+            &mut self.server_list[0]
         }
-        println!("Error server not found");
-        &mut self.server_list[0]
     }
 }
