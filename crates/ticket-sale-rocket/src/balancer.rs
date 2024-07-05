@@ -63,10 +63,10 @@ impl RequestHandler for Balancer {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
+                let mut guard = self.coordinator.lock();
                 let server_no = match rq.server_id() {
                     Some(n) => n,
                     None => {
-                        let guard = self.coordinator.lock();
                         if guard.no_active_servers == 0 {
                             rq.respond_with_err("no server available");
                             return;
@@ -76,7 +76,6 @@ impl RequestHandler for Balancer {
                         x
                     }
                 };
-                let mut guard = self.coordinator.lock();
                 let server = guard.get_server_mut(server_no);
                 if (*rq.kind() != RequestKind::ReserveTicket && server.get_status() == 1)
                     || server.get_status() == 0

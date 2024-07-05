@@ -44,24 +44,26 @@ impl Estimator {
             drop(guard);
             aux
         };
-
-        let tickets = self.database.lock().get_num_available();
+        let guard = self.database.lock();
+        let tickets = guard.get_num_available();
+        drop(guard);
         let mut sum = 0;
+        let mut tickets_in_server_guard = self.tickets_in_server.lock();
         for server in &servers {
-            if self.tickets_in_server.lock().contains_key(server) {
-                sum += self.tickets_in_server.lock()[server];
+            if tickets_in_server_guard.contains_key(server) {
+                sum += tickets_in_server_guard[server];
             } else {
-                self.tickets_in_server.lock().insert(*server, 0);
+                tickets_in_server_guard.insert(*server, 0);
             }
         }
         for server in &servers {
-            sum -= self.tickets_in_server.lock()[server];
-            *self.tickets_in_server.lock().get_mut(server).unwrap() = self
+            sum -= tickets_in_server_guard[server];
+            *tickets_in_server_guard.get_mut(server).unwrap() = self
                 .coordinator
                 .lock()
                 .get_server_mut(*server)
                 .send_tickets(sum + tickets);
-            sum += self.tickets_in_server.lock()[server];
+            sum += tickets_in_server_guard[server];
             sleep(Duration::from_secs(
                 (self.roundtrip_secs / servers.len() as u32) as u64,
             ));

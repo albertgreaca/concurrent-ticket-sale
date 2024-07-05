@@ -28,12 +28,14 @@ impl Server {
     /// Create a new [`Server`]
     pub fn new(database: Arc<Mutex<Database>>, timeout: u32) -> Server {
         let id = Uuid::new_v4();
-        let num_tickets = (database.lock().get_num_available() as f64).sqrt().ceil() as u32;
-        let tickets = database.lock().allocate(num_tickets);
+        let database2 = database.clone();
+        let mut database_guard = database.lock();
+        let num_tickets = (database_guard.get_num_available() as f64).sqrt() as u32;
+        let tickets = database_guard.allocate(num_tickets);
         Self {
             id,
             estimate: 0,
-            database,
+            database: database2,
             status: 0,
             tickets,
             reserved: HashMap::new(),
@@ -78,14 +80,13 @@ impl Server {
                     return;
                 }*/
                 if self.tickets.is_empty() {
-                    if self.database.lock().get_num_available() == 0 {
+                    let mut database_guard = self.database.lock();
+                    if database_guard.get_num_available() == 0 {
                         rq.respond_with_sold_out();
                         return;
                     }
-                    let num_tickets =
-                        (self.database.lock().get_num_available() as f64).sqrt() as u32;
-                    self.tickets
-                        .extend(self.database.lock().allocate(num_tickets));
+                    let num_tickets = (database_guard.get_num_available() as f64).sqrt() as u32;
+                    self.tickets.extend(database_guard.allocate(num_tickets));
                 }
                 let ticket = self.tickets.pop().unwrap();
                 self.reserved.insert(bloke, (ticket, Instant::now()));
