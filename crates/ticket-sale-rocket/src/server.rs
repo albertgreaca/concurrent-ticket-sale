@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Instant;
 
+use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
@@ -28,10 +28,8 @@ impl Server {
     /// Create a new [`Server`]
     pub fn new(database: Arc<Mutex<Database>>, timeout: u32) -> Server {
         let id = Uuid::new_v4();
-        let num_tickets = (database.lock().unwrap().get_num_available() as f64)
-            .sqrt()
-            .ceil() as u32;
-        let tickets = database.lock().unwrap().allocate(num_tickets);
+        let num_tickets = (database.lock().get_num_available() as f64).sqrt().ceil() as u32;
+        let tickets = database.lock().allocate(num_tickets);
         Self {
             id,
             estimate: 0,
@@ -52,7 +50,7 @@ impl Server {
                     self.tickets.push(*ticket);
                 } else {
                     let x = *ticket;
-                    self.database.lock().unwrap().deallocate(&[x]);
+                    self.database.lock().deallocate(&[x]);
                 }
                 false
             } else {
@@ -60,10 +58,7 @@ impl Server {
             }
         });
         if self.reserved.is_empty() && self.status == 1 {
-            self.database
-                .lock()
-                .unwrap()
-                .deallocate(self.tickets.as_slice());
+            self.database.lock().deallocate(self.tickets.as_slice());
             self.tickets.clear();
             self.status = 2;
         }
@@ -83,14 +78,14 @@ impl Server {
                     return;
                 }*/
                 if self.tickets.is_empty() {
-                    if self.database.lock().unwrap().get_num_available() == 0 {
+                    if self.database.lock().get_num_available() == 0 {
                         rq.respond_with_sold_out();
                         return;
                     }
                     let num_tickets =
-                        (self.database.lock().unwrap().get_num_available() as f64).sqrt() as u32;
+                        (self.database.lock().get_num_available() as f64).sqrt() as u32;
                     self.tickets
-                        .extend(self.database.lock().unwrap().allocate(num_tickets));
+                        .extend(self.database.lock().allocate(num_tickets));
                 }
                 let ticket = self.tickets.pop().unwrap();
                 self.reserved.insert(bloke, (ticket, Instant::now()));
@@ -109,10 +104,7 @@ impl Server {
                             self.reserved.remove(&bloke);
                             self.bought.insert(bloke, ticket);
                             if self.reserved.is_empty() && self.status == 1 {
-                                self.database
-                                    .lock()
-                                    .unwrap()
-                                    .deallocate(self.tickets.as_slice());
+                                self.database.lock().deallocate(self.tickets.as_slice());
                                 self.tickets.clear();
                                 self.status = 2;
                             }
@@ -139,13 +131,10 @@ impl Server {
                             if self.status == 0 {
                                 self.tickets.push(ticket);
                             } else {
-                                self.database.lock().unwrap().deallocate(&[ticket]);
+                                self.database.lock().deallocate(&[ticket]);
                             }
                             if self.reserved.is_empty() && self.status == 1 {
-                                self.database
-                                    .lock()
-                                    .unwrap()
-                                    .deallocate(self.tickets.as_slice());
+                                self.database.lock().deallocate(self.tickets.as_slice());
                                 self.tickets.clear();
                                 self.status = 2;
                             }
@@ -171,7 +160,7 @@ impl Server {
                     self.tickets.push(*ticket);
                 } else {
                     let x = *ticket;
-                    self.database.lock().unwrap().deallocate(&[x]);
+                    self.database.lock().deallocate(&[x]);
                 }
                 false
             } else {
@@ -200,10 +189,7 @@ impl Server {
 
     pub fn deactivate(&mut self) {
         self.status = 1;
-        self.database
-            .lock()
-            .unwrap()
-            .deallocate(self.tickets.as_slice());
+        self.database.lock().deallocate(self.tickets.as_slice());
         self.tickets.clear();
         if self.reserved.is_empty() {
             self.status = 2;

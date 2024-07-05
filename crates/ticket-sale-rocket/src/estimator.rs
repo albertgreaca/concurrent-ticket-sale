@@ -1,9 +1,9 @@
 //! Implementation of the estimator
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::{collections::HashMap, thread::sleep, time::Duration};
 
+use parking_lot::Mutex;
 use uuid::Uuid;
 
 use super::coordinator::Coordinator;
@@ -39,35 +39,29 @@ impl Estimator {
 
     pub fn run(&self) {
         let servers = {
-            let guard = self.coordinator.lock().unwrap();
+            let guard = self.coordinator.lock();
             let aux = guard.get_estimator_servers().clone();
             drop(guard);
             aux
         };
 
-        let tickets = self.database.lock().unwrap().get_num_available();
+        let tickets = self.database.lock().get_num_available();
         let mut sum = 0;
         for server in &servers {
-            if self.tickets_in_server.lock().unwrap().contains_key(server) {
-                sum += self.tickets_in_server.lock().unwrap()[server];
+            if self.tickets_in_server.lock().contains_key(server) {
+                sum += self.tickets_in_server.lock()[server];
             } else {
-                self.tickets_in_server.lock().unwrap().insert(*server, 0);
+                self.tickets_in_server.lock().insert(*server, 0);
             }
         }
         for server in &servers {
-            sum -= self.tickets_in_server.lock().unwrap()[server];
-            *self
-                .tickets_in_server
-                .lock()
-                .unwrap()
-                .get_mut(server)
-                .unwrap() = self
+            sum -= self.tickets_in_server.lock()[server];
+            *self.tickets_in_server.lock().get_mut(server).unwrap() = self
                 .coordinator
                 .lock()
-                .unwrap()
                 .get_server_mut(*server)
                 .send_tickets(sum + tickets);
-            sum += self.tickets_in_server.lock().unwrap()[server];
+            sum += self.tickets_in_server.lock()[server];
             sleep(Duration::from_secs(
                 (self.roundtrip_secs / servers.len() as u32) as u64,
             ));

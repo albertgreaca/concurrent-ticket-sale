@@ -1,7 +1,7 @@
 //! Implementation of the coordinator
 use std::sync::Arc;
-use std::sync::Mutex;
 
+use parking_lot::Mutex;
 use rand::Rng;
 use uuid::Uuid;
 

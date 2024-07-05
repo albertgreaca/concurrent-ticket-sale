@@ -11,10 +11,10 @@
 #![allow(rustdoc::private_intra_doc_links)]
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::thread;
 
 use estimator::Estimator;
+use parking_lot::Mutex;
 use ticket_sale_core::Config;
 
 mod balancer;
@@ -43,7 +43,7 @@ pub fn launch(config: &Config) -> Balancer {
         config.timeout,
         database.clone(),
     )));
-    coordinator.lock().unwrap().scale_to(config.initial_servers);
+    coordinator.lock().scale_to(config.initial_servers);
     let estimator = Arc::new(Estimator::new(
         database.clone(),
         coordinator.clone(),
