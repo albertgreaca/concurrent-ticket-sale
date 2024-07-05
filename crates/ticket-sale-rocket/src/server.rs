@@ -165,6 +165,19 @@ impl Server {
     }
 
     pub fn send_tickets(&mut self, tickets: u32) -> u32 {
+        self.reserved.retain(|_, (ticket, time)| {
+            if time.elapsed().as_secs() > self.timeout as u64 {
+                if self.status == 0 {
+                    self.tickets.push(*ticket);
+                } else {
+                    let x = *ticket;
+                    self.database.lock().unwrap().deallocate(&[x]);
+                }
+                false
+            } else {
+                true
+            }
+        });
         self.estimate = tickets;
         self.tickets.len() as u32
     }
