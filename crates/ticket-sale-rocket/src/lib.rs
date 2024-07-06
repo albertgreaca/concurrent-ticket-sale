@@ -39,11 +39,8 @@ pub fn launch(config: &Config) -> Balancer {
     }
 
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
-    let coordinator = Arc::new(Mutex::new(Coordinator::new(
-        config.timeout,
-        database.clone(),
-    )));
-    coordinator.lock().scale_to(config.initial_servers);
+    let coordinator = Arc::new(Coordinator::new(config.timeout, database.clone()));
+    coordinator.scale_to(config.initial_servers);
     let estimator = Arc::new(Estimator::new(
         database.clone(),
         coordinator.clone(),

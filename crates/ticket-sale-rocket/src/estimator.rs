@@ -11,7 +11,7 @@ use super::database::Database;
 
 /// Estimator that estimates the number of tickets available overall
 pub struct Estimator {
-    coordinator: Arc<Mutex<Coordinator>>,
+    coordinator: Arc<Coordinator>,
     database: Arc<Mutex<Database>>,
     roundtrip_secs: u32,
     tickets_in_server: Mutex<HashMap<Uuid, u32>>,
@@ -26,7 +26,7 @@ impl Estimator {
 
     pub fn new(
         database: Arc<Mutex<Database>>,
-        coordinator: Arc<Mutex<Coordinator>>,
+        coordinator: Arc<Coordinator>,
         roundtrip_secs: u32,
     ) -> Self {
         Self {
@@ -39,7 +39,7 @@ impl Estimator {
 
     pub fn run(&self) {
         let servers = {
-            let guard = self.coordinator.lock();
+            let guard = self.coordinator.clone();
             let aux = guard.get_estimator_servers().clone();
             drop(guard);
             aux
@@ -60,8 +60,8 @@ impl Estimator {
             sum -= tickets_in_server_guard[server];
             *tickets_in_server_guard.get_mut(server).unwrap() = self
                 .coordinator
+                .get_server(*server)
                 .lock()
-                .get_server_mut(*server)
                 .send_tickets(sum + tickets);
             sum += tickets_in_server_guard[server];
             sleep(Duration::from_secs(

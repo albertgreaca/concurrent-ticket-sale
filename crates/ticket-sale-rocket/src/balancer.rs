@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 
 use super::coordinator::Coordinator;
@@ -14,7 +13,7 @@ use super::estimator::Estimator;
 /// exposed from the crate root (to be used from the tester as
 /// `ticket_sale_rocket::Balancer`).
 pub struct Balancer {
-    coordinator: Arc<Mutex<Coordinator>>,
+    coordinator: Arc<Coordinator>,
     estimator: Arc<Estimator>,
     other_thread: JoinHandle<()>,
 }
@@ -22,7 +21,7 @@ pub struct Balancer {
 impl Balancer {
     /// Create a new [`Balancer`]
     pub fn new(
-        coordinator: Arc<Mutex<Coordinator>>,
+        coordinator: Arc<Coordinator>,
         estimator: Arc<Estimator>,
         other_thread: JoinHandle<()>,
     ) -> Self {
@@ -41,12 +40,12 @@ impl RequestHandler for Balancer {
     fn handle(&self, mut rq: Request) {
         match rq.kind() {
             RequestKind::GetNumServers => {
-                rq.respond_with_int(self.coordinator.lock().get_num_active_servers());
+                rq.respond_with_int(self.coordinator.get_num_active_servers());
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
                     Some(n) => {
-                        self.coordinator.lock().scale_to(n);
+                        self.coordinator.scale_to(n);
                         rq.respond_with_int(n);
                     }
                     None => {
@@ -55,7 +54,7 @@ impl RequestHandler for Balancer {
                 };
             }
             RequestKind::GetServers => {
-                rq.respond_with_server_list(self.coordinator.lock().get_active_servers());
+                rq.respond_with_server_list(self.coordinator.get_active_servers().as_slice());
             }
             RequestKind::Debug => {
                 // 📌 Hint: You can use `rq.url()` and `rq.method()` to
@@ -63,11 +62,11 @@ impl RequestHandler for Balancer {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                let mut guard = self.coordinator.lock();
+                let guard = self.coordinator.clone();
                 let server_no = match rq.server_id() {
                     Some(n) => n,
                     None => {
-                        if guard.no_active_servers == 0 {
+                        if *guard.no_active_servers.lock() == 0 {
                             rq.respond_with_err("no server available");
                             return;
                         }
@@ -76,13 +75,13 @@ impl RequestHandler for Balancer {
                         x
                     }
                 };
-                let server = guard.get_server_mut(server_no);
-                if (*rq.kind() != RequestKind::ReserveTicket && server.get_status() == 1)
-                    || server.get_status() == 0
+                let server = guard.get_server(server_no);
+                if (*rq.kind() != RequestKind::ReserveTicket && server.lock().get_status() == 1)
+                    || server.lock().get_status() == 0
                 {
-                    server.handle_request(rq);
+                    server.lock().handle_request(rq);
                 } else {
-                    if guard.no_active_servers == 0 {
+                    if *guard.no_active_servers.lock() == 0 {
                         rq.respond_with_err("no server available");
                         return;
                     }
