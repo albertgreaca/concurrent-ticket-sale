@@ -80,7 +80,7 @@ impl Coordinator {
 
     pub fn get_active_servers(&self) -> Vec<Uuid> {
         let n = *self.no_active_servers.lock() as usize;
-        self.server_id_list.lock().clone()[0..n].to_vec()
+        self.server_id_list.lock()[0..n].to_vec()
     }
 
     pub fn get_estimator_servers(&self) -> Vec<Uuid> {
