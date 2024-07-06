@@ -38,12 +38,7 @@ impl Estimator {
     }
 
     pub fn run(&mut self) {
-        let servers = {
-            let guard = self.coordinator.clone();
-            let aux = guard.get_estimator_servers().clone();
-            drop(guard);
-            aux
-        };
+        let servers = self.coordinator.get_estimator_servers();
         let guard = self.database.lock();
         let tickets = guard.get_num_available();
         drop(guard);

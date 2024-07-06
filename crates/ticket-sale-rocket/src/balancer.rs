@@ -63,36 +63,34 @@ impl RequestHandler for Balancer {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                let guard = self.coordinator.clone();
                 let server_no = match rq.server_id() {
                     Some(n) => n,
                     None => {
-                        if *guard.no_active_servers.lock() == 0 {
+                        if *self.coordinator.no_active_servers.lock() == 0 {
                             rq.respond_with_err("no server available");
                             return;
                         }
-                        let x = guard.get_random_server();
+                        let x = self.coordinator.get_random_server();
                         rq.set_server_id(x);
                         x
                     }
                 };
-                let server = guard.get_server(server_no);
+                let server = self.coordinator.get_server(server_no);
                 if (*rq.kind() != RequestKind::ReserveTicket && server.lock().get_status() == 1)
                     || server.lock().get_status() == 0
                 {
                     server.lock().handle_request(rq);
                 } else {
-                    if *guard.no_active_servers.lock() == 0 {
+                    if *self.coordinator.no_active_servers.lock() == 0 {
                         rq.respond_with_err("no server available");
                         return;
                     }
-                    let x = guard.get_random_server();
+                    let x = self.coordinator.get_random_server();
                     rq.set_server_id(x);
                     rq.respond_with_err("server terminating");
                     //let server = guard.get_server_mut(x);
                     //server.handle_request(rq);
                 }
-                drop(guard);
             }
         }
     }
