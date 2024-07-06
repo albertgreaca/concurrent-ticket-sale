@@ -17,9 +17,9 @@ pub struct Coordinator {
     ///
     /// To be handed over to new servers.
     database: Arc<Mutex<Database>>,
-    server_list: Arc<Mutex<Vec<Arc<Mutex<Server>>>>>,
-    server_id_list: Arc<Mutex<Vec<Uuid>>>,
-    server_map_index: Arc<Mutex<HashMap<Uuid, usize>>>,
+    server_list: Mutex<Vec<Arc<Mutex<Server>>>>,
+    server_id_list: Mutex<Vec<Uuid>>,
+    server_map_index: Mutex<HashMap<Uuid, usize>>,
     pub no_active_servers: Mutex<u32>,
 }
 
@@ -29,9 +29,9 @@ impl Coordinator {
         Self {
             reservation_timeout,
             database,
-            server_list: Arc::new(Mutex::new(Vec::new())),
-            server_id_list: Arc::new(Mutex::new(Vec::new())),
-            server_map_index: Arc::new(Mutex::new(HashMap::new())),
+            server_list: Mutex::new(Vec::new()),
+            server_id_list: Mutex::new(Vec::new()),
+            server_map_index: Mutex::new(HashMap::new()),
             no_active_servers: Mutex::new(0),
         }
     }
