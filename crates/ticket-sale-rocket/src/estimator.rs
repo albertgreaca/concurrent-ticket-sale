@@ -14,7 +14,7 @@ pub struct Estimator {
     coordinator: Arc<Coordinator>,
     database: Arc<Mutex<Database>>,
     roundtrip_secs: u32,
-    tickets_in_server: Mutex<HashMap<Uuid, u32>>,
+    tickets_in_server: HashMap<Uuid, u32>,
 }
 
 impl Estimator {
@@ -33,11 +33,11 @@ impl Estimator {
             coordinator,
             database,
             roundtrip_secs,
-            tickets_in_server: Mutex::new(HashMap::new()),
+            tickets_in_server: HashMap::new(),
         }
     }
 
-    pub fn run(&self) {
+    pub fn run(&mut self) {
         let servers = {
             let guard = self.coordinator.clone();
             let aux = guard.get_estimator_servers().clone();
@@ -48,22 +48,21 @@ impl Estimator {
         let tickets = guard.get_num_available();
         drop(guard);
         let mut sum = 0;
-        let mut tickets_in_server_guard = self.tickets_in_server.lock();
         for server in &servers {
-            if tickets_in_server_guard.contains_key(server) {
-                sum += tickets_in_server_guard[server];
+            if self.tickets_in_server.contains_key(server) {
+                sum += self.tickets_in_server[server];
             } else {
-                tickets_in_server_guard.insert(*server, 0);
+                self.tickets_in_server.insert(*server, 0);
             }
         }
         for server in &servers {
-            sum -= tickets_in_server_guard[server];
-            *tickets_in_server_guard.get_mut(server).unwrap() = self
+            sum -= self.tickets_in_server[server];
+            *self.tickets_in_server.get_mut(server).unwrap() = self
                 .coordinator
                 .get_server(*server)
                 .lock()
                 .send_tickets(sum + tickets);
-            sum += tickets_in_server_guard[server];
+            sum += self.tickets_in_server[server];
             sleep(Duration::from_secs(
                 (self.roundtrip_secs / servers.len() as u32) as u64,
             ));
