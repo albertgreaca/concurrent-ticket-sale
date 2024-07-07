@@ -20,7 +20,6 @@ pub struct Server {
     status: u32,
     tickets: Vec<u32>,
     reserved: HashMap<Uuid, (u32, Instant)>,
-    bought: HashMap<Uuid, u32>,
     timeout: u32,
 }
 
@@ -37,7 +36,6 @@ impl Server {
             status: 0,
             tickets,
             reserved: HashMap::new(),
-            bought: HashMap::new(),
             timeout,
         }
     }
@@ -102,7 +100,6 @@ impl Server {
                     if self.reserved.contains_key(&bloke) {
                         if self.reserved[&bloke].0 == ticket {
                             self.reserved.remove(&bloke);
-                            self.bought.insert(bloke, ticket);
                             if self.reserved.is_empty() && self.status == 1 {
                                 self.database.lock().deallocate(self.tickets.as_slice());
                                 self.tickets.clear();
