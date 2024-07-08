@@ -65,7 +65,6 @@ impl Server {
                 rq.respond_with_int(self.get_available_tickets());
             }
             RequestKind::ReserveTicket => {
-                rq.set_server_id(self.id);
                 let bloke = rq.customer_id();
                 if self.reserved.contains_key(&bloke) {
                     rq.respond_with_err("one reservation already present");
@@ -90,7 +89,6 @@ impl Server {
                 rq.respond_with_int(ticket);
             }
             RequestKind::BuyTicket => {
-                rq.set_server_id(self.id);
                 let ticket_option = rq.read_u32();
                 if ticket_option.is_none() {
                     rq.respond_with_err("no ticket");
@@ -115,7 +113,6 @@ impl Server {
                 }
             }
             RequestKind::AbortPurchase => {
-                rq.set_server_id(self.id);
                 let ticket_option = rq.read_u32();
                 if ticket_option.is_none() {
                     rq.respond_with_err("no ticket");
