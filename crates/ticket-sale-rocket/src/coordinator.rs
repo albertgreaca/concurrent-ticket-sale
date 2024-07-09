@@ -57,6 +57,7 @@ impl Coordinator {
         }
     }
 
+    /// Get the channel for sending user requests to the server with the given id
     pub fn get_balancer_server_sender(&self, id: Uuid) -> Sender<Request> {
         if self.server_map_index.lock().contains_key(&id) {
             self.server_sender_req_list.lock()[self.server_map_index.lock()[&id]].clone()
@@ -66,14 +67,19 @@ impl Coordinator {
         }
     }
 
+    /// Get the status of the server with the given id
     pub fn get_status(&self, id: Uuid) -> u32 {
         let guard = self.server_map_index.lock();
+
+        // Send a request for the status
         if guard.contains_key(&id) {
             let _ = self.server_status_request_list.lock()[guard[&id]].send(0);
         } else {
             // Should never happen
             let _ = self.server_status_request_list.lock()[0].send(0);
         }
+
+        // Wait for the server to return its status
         if guard.contains_key(&id) {
             return self.server_status_receiver_list.lock()[guard[&id]]
                 .recv()
@@ -84,26 +90,34 @@ impl Coordinator {
         }
     }
 
+    /// Get the number of servers that are non-terminating
     pub fn get_num_active_servers(&self) -> u32 {
         let id = self.no_active_servers.lock();
         *id
     }
 
+    /// Scale to the given number of servers
     pub fn scale_to(&self, num_servers: u32) {
         let mut server_id_list_guard = self.server_id_list.lock();
         let mut no_active_servers_guard = self.no_active_servers.lock();
+
+        // We need to activate servers
         if *no_active_servers_guard < num_servers {
+            // We activate existing servers
             while *no_active_servers_guard < num_servers
                 && *no_active_servers_guard < server_id_list_guard.len() as u32
             {
-                let server_send_act = self.server_sender_de_activation_list.lock()
+                // Get the channel for the server activation and activate the server
+                let _ = self.server_sender_de_activation_list.lock()
                     [*no_active_servers_guard as usize]
-                    .clone();
-                let _ = server_send_act.send(true);
+                    .send(true);
+
                 *no_active_servers_guard += 1;
             }
 
+            // We need to add more servers
             while *no_active_servers_guard < num_servers {
+                // Create channels for the new server
                 let (server_req_send, server_req_rec) = channel();
                 let (server_est_send, server_est_rec) = channel();
                 let (server_act_send, server_act_rec) = channel();
@@ -111,6 +125,7 @@ impl Coordinator {
                 let (server_status_req_send, server_status_req_rec) = channel();
                 let (server_status_send, server_status_rec) = channel();
 
+                // Create the server
                 let mut server = Server::new(
                     self.database.clone(),
                     self.reservation_timeout,
@@ -123,13 +138,16 @@ impl Coordinator {
                     self.estimator_sender.clone(),
                 );
                 let server_id = server.id;
+
+                // Start the server
                 self.server_thread_list
                     .lock()
                     .push(thread::spawn(move || server.run()));
+
+                // Add everything to the lists
                 server_id_list_guard.push(server_id);
                 self.server_sender_req_list.lock().push(server_req_send);
                 self.server_sender_est_list.lock().push(server_est_send);
-                let _ = server_act_send.send(true);
                 self.server_sender_de_activation_list
                     .lock()
                     .push(server_act_send);
@@ -149,21 +167,26 @@ impl Coordinator {
             }
         }
 
+        // We need to deactivate servers
         if *no_active_servers_guard > num_servers {
             while *no_active_servers_guard > num_servers {
+                // Get the channel for the server deactivation and deactivate the server
                 let _ = self.server_sender_de_activation_list.lock()
                     [(*no_active_servers_guard - 1) as usize]
                     .send(false);
+
                 *no_active_servers_guard -= 1;
             }
         }
     }
 
+    /// Get ids corresponding to non-terminating servers
     pub fn get_active_servers(&self) -> Vec<Uuid> {
         let n = *self.no_active_servers.lock() as usize;
         self.server_id_list.lock()[0..n].to_vec()
     }
 
+    /// Get estimator sender channels for servers that aren't completely terminated
     pub fn get_estimator_senders(&self) -> Vec<Sender<u32>> {
         let mut senders = Vec::new();
         for (i, sender) in self.server_sender_est_list.lock().iter().enumerate() {
@@ -174,6 +197,7 @@ impl Coordinator {
         senders
     }
 
+    /// Get ids of servers that aren't completely terminated
     pub fn get_estimator_servers(&self) -> Vec<Uuid> {
         let mut servers = Vec::new();
         let guard = self.server_id_list.lock();
@@ -185,11 +209,13 @@ impl Coordinator {
         servers
     }
 
+    /// Get the id of a random non-terminating server
     pub fn get_random_server(&self) -> Uuid {
         let mut rng = rand::thread_rng();
         self.server_id_list.lock()[rng.gen_range(0..*self.no_active_servers.lock()) as usize]
     }
 
+    /// Shut down all servers
     pub fn shutdown(&self) {
         let senders = self.server_sender_shutdown_list.lock().clone();
         for sender in senders {
