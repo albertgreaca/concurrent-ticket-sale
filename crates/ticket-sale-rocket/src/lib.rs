@@ -10,6 +10,7 @@
 
 #![allow(rustdoc::private_intra_doc_links)]
 
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread;
 
@@ -37,14 +38,15 @@ pub fn launch(config: &Config) -> Balancer {
     if config.bonus {
         todo!("Bonus not implemented!")
     }
-
+    let (est_send, est_rec) = channel();
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
-    let coordinator = Arc::new(Coordinator::new(config.timeout, database.clone()));
+    let coordinator = Arc::new(Coordinator::new(config.timeout, database.clone(), est_send));
     coordinator.scale_to(config.initial_servers);
     let estimator = Arc::new(Mutex::new(Estimator::new(
         database.clone(),
         coordinator.clone(),
         config.estimator_roundtrip_time,
+        est_rec,
     )));
     let estimator2 = estimator.clone();
     let other_thread = thread::spawn(move || {

@@ -1,5 +1,6 @@
 //! Implementation of the estimator
 
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::{collections::HashMap, thread::sleep, time::Duration};
 
@@ -15,6 +16,7 @@ pub struct Estimator {
     database: Arc<Mutex<Database>>,
     roundtrip_secs: u32,
     tickets_in_server: HashMap<Uuid, u32>,
+    receive_from_server: Receiver<u32>,
 }
 
 impl Estimator {
@@ -28,17 +30,20 @@ impl Estimator {
         database: Arc<Mutex<Database>>,
         coordinator: Arc<Coordinator>,
         roundtrip_secs: u32,
+        receive_from_server: Receiver<u32>,
     ) -> Self {
         Self {
             coordinator,
             database,
             roundtrip_secs,
             tickets_in_server: HashMap::new(),
+            receive_from_server,
         }
     }
 
     pub fn run(&mut self) {
         let servers = self.coordinator.get_estimator_servers();
+        let senders = self.coordinator.get_estimator_senders();
         let guard = self.database.lock();
         let tickets = guard.get_num_available();
         drop(guard);
@@ -50,13 +55,11 @@ impl Estimator {
                 self.tickets_in_server.insert(*server, 0);
             }
         }
-        for server in &servers {
+        for (server, sender) in servers.iter().zip(senders.iter()) {
             sum -= self.tickets_in_server[server];
-            *self.tickets_in_server.get_mut(server).unwrap() = self
-                .coordinator
-                .get_server(*server)
-                .lock()
-                .send_tickets(sum + tickets);
+            let _ = sender.send(sum + tickets);
+            *self.tickets_in_server.get_mut(server).unwrap() =
+                self.receive_from_server.recv().unwrap();
             sum += self.tickets_in_server[server];
             sleep(Duration::from_secs(
                 (self.roundtrip_secs / servers.len() as u32) as u64,

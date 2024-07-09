@@ -1,8 +1,9 @@
 //! Implementation of the server
-
-use std::collections::HashMap;
+#![allow(clippy::too_many_arguments)]
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::Instant;
+use std::{collections::HashMap, sync::mpsc::Receiver};
 
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestKind};
@@ -13,19 +14,36 @@ use super::database::Database;
 /// A server in the ticket sales system
 pub struct Server {
     /// The server's ID
-    id: Uuid,
+    pub id: Uuid,
     estimate: u32,
     /// The database
     database: Arc<Mutex<Database>>,
-    status: u32,
+    pub status: u32,
     tickets: Vec<u32>,
     reserved: HashMap<Uuid, (u32, Instant)>,
     timeout: u32,
+    balancer_receiver: Receiver<Request>,
+    estimator_receiver: Receiver<u32>,
+    de_activate_receiver: Receiver<bool>,
+    shutdown_receiver: Receiver<bool>,
+    status_req_receiver: Receiver<u32>,
+    status_sender: Sender<u32>,
+    estimator_sender: Sender<u32>,
 }
 
 impl Server {
     /// Create a new [`Server`]
-    pub fn new(database: Arc<Mutex<Database>>, timeout: u32) -> Server {
+    pub fn new(
+        database: Arc<Mutex<Database>>,
+        timeout: u32,
+        balancer_receiver: Receiver<Request>,
+        estimator_receiver: Receiver<u32>,
+        de_activate_receiver: Receiver<bool>,
+        shutdown_receiver: Receiver<bool>,
+        status_req_receiver: Receiver<u32>,
+        status_sender: Sender<u32>,
+        estimator_sender: Sender<u32>,
+    ) -> Server {
         let id = Uuid::new_v4();
         let num_tickets = (database.lock().get_num_available() as f64).sqrt().ceil() as u32;
         let tickets = database.lock().allocate(num_tickets);
@@ -37,10 +55,33 @@ impl Server {
             tickets,
             reserved: HashMap::new(),
             timeout,
+            balancer_receiver,
+            estimator_receiver,
+            de_activate_receiver,
+            shutdown_receiver,
+            status_req_receiver,
+            status_sender,
+            estimator_sender,
         }
     }
 
     /// Handle a [`Request`]
+    pub fn cycle(&mut self) {
+        if self.status_req_receiver.try_recv().is_ok() {
+            let _ = self.status_sender.send(self.status);
+        }
+        match self.estimator_receiver.try_recv() {
+            Ok(value) => {
+                self.send_tickets(value);
+            }
+            Err(_) => {
+                if let Ok(rq) = self.balancer_receiver.try_recv() {
+                    self.handle_request(rq)
+                }
+            }
+        }
+    }
+
     pub fn handle_request(&mut self, mut rq: Request) {
         self.reserved.retain(|_, (ticket, time)| {
             if time.elapsed().as_secs() > self.timeout as u64 {
@@ -65,6 +106,7 @@ impl Server {
                 rq.respond_with_int(self.get_available_tickets());
             }
             RequestKind::ReserveTicket => {
+                rq.set_server_id(self.id);
                 let bloke = rq.customer_id();
                 if self.reserved.contains_key(&bloke) {
                     rq.respond_with_err("one reservation already present");
@@ -89,6 +131,7 @@ impl Server {
                 rq.respond_with_int(ticket);
             }
             RequestKind::BuyTicket => {
+                rq.set_server_id(self.id);
                 let ticket_option = rq.read_u32();
                 if ticket_option.is_none() {
                     rq.respond_with_err("no ticket");
@@ -113,6 +156,7 @@ impl Server {
                 }
             }
             RequestKind::AbortPurchase => {
+                rq.set_server_id(self.id);
                 let ticket_option = rq.read_u32();
                 if ticket_option.is_none() {
                     rq.respond_with_err("no ticket");
@@ -147,7 +191,7 @@ impl Server {
         }
     }
 
-    pub fn send_tickets(&mut self, tickets: u32) -> u32 {
+    pub fn send_tickets(&mut self, tickets: u32) {
         self.reserved.retain(|_, (ticket, time)| {
             if time.elapsed().as_secs() > self.timeout as u64 {
                 if self.status == 0 {
@@ -162,19 +206,27 @@ impl Server {
             }
         });
         self.estimate = tickets;
-        self.tickets.len() as u32
+        let _ = self.estimator_sender.send(self.tickets.len() as u32);
     }
 
     pub fn get_available_tickets(&self) -> u32 {
         self.tickets.len() as u32 + self.estimate
     }
 
-    pub fn get_id(&self) -> Uuid {
-        self.id
-    }
-
-    pub fn get_status(&self) -> u32 {
-        self.status
+    pub fn run(&mut self) {
+        loop {
+            self.cycle();
+            if self.shutdown_receiver.try_recv().is_ok() {
+                break;
+            }
+            if let Ok(value) = self.de_activate_receiver.try_recv() {
+                if value {
+                    self.activate()
+                } else {
+                    self.deactivate()
+                }
+            }
+        }
     }
 
     pub fn activate(&mut self) {

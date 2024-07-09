@@ -75,11 +75,10 @@ impl RequestHandler for Balancer {
                         x
                     }
                 };
-                let server = self.coordinator.get_server(server_no);
-                if (*rq.kind() != RequestKind::ReserveTicket && server.lock().get_status() == 1)
-                    || server.lock().get_status() == 0
-                {
-                    server.lock().handle_request(rq);
+                let status = self.coordinator.get_status(server_no);
+                if (*rq.kind() != RequestKind::ReserveTicket && status == 1) || status == 0 {
+                    let server_sender = self.coordinator.get_balancer_server_sender(server_no);
+                    let _ = server_sender.send(rq);
                 } else {
                     if *self.coordinator.no_active_servers.lock() == 0 {
                         rq.respond_with_err("no server available");
@@ -88,8 +87,6 @@ impl RequestHandler for Balancer {
                     let x = self.coordinator.get_random_server();
                     rq.set_server_id(x);
                     rq.respond_with_err("server terminating");
-                    //let server = guard.get_server_mut(x);
-                    //server.handle_request(rq);
                 }
             }
         }
@@ -98,5 +95,6 @@ impl RequestHandler for Balancer {
     fn shutdown(self) {
         drop(self.estimator);
         self.other_thread.join().unwrap();
+        self.coordinator.shutdown();
     }
 }
