@@ -165,7 +165,13 @@ impl Coordinator {
     }
 
     pub fn get_estimator_senders(&self) -> Vec<Sender<u32>> {
-        return self.server_sender_est_list.lock().clone();
+        let mut senders = Vec::new();
+        for (i, sender) in self.server_sender_est_list.lock().iter().enumerate() {
+            if self.get_status(self.server_id_list.lock()[i]) != 2 {
+                senders.push((*sender).clone());
+            }
+        }
+        senders
     }
 
     pub fn get_estimator_servers(&self) -> Vec<Uuid> {

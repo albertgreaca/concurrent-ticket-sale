@@ -73,7 +73,7 @@ impl Server {
             }
             Err(_) => {
                 if let Ok(rq) = self.balancer_receiver.try_recv() {
-                    self.handle_request(rq)
+                    self.handle_request(rq);
                 }
             }
         }
