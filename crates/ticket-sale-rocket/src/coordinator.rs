@@ -67,15 +67,15 @@ impl Coordinator {
     }
 
     pub fn get_status(&self, id: Uuid) -> u32 {
-        if self.server_map_index.lock().contains_key(&id) {
-            let _ =
-                self.server_status_request_list.lock()[self.server_map_index.lock()[&id]].send(0);
+        let guard = self.server_map_index.lock();
+        if guard.contains_key(&id) {
+            let _ = self.server_status_request_list.lock()[guard[&id]].send(0);
         } else {
             // Should never happen
             let _ = self.server_status_request_list.lock()[0].send(0);
         }
-        if self.server_map_index.lock().contains_key(&id) {
-            return self.server_status_receiver_list.lock()[self.server_map_index.lock()[&id]]
+        if guard.contains_key(&id) {
+            return self.server_status_receiver_list.lock()[guard[&id]]
                 .recv()
                 .unwrap();
         } else {
@@ -175,9 +175,14 @@ impl Coordinator {
     }
 
     pub fn get_estimator_servers(&self) -> Vec<Uuid> {
-        let mut aux = self.server_id_list.lock().clone();
-        aux.retain(|x| self.get_status(*x) != 2);
-        aux
+        let mut servers = Vec::new();
+        let guard = self.server_id_list.lock();
+        for (i, sender) in guard.iter().enumerate() {
+            if self.get_status(guard[i]) != 2 {
+                servers.push(*sender);
+            }
+        }
+        servers
     }
 
     pub fn get_random_server(&self) -> Uuid {
