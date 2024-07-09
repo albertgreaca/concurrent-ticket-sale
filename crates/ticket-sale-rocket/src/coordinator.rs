@@ -127,8 +127,8 @@ impl Coordinator {
                     .lock()
                     .push(thread::spawn(move || server.run()));
                 server_id_list_guard.push(server_id);
-                self.server_sender_est_list.lock().push(server_est_send);
                 self.server_sender_req_list.lock().push(server_req_send);
+                self.server_sender_est_list.lock().push(server_est_send);
                 let _ = server_act_send.send(true);
                 self.server_sender_de_activation_list
                     .lock()

@@ -67,6 +67,10 @@ impl Server {
 
     /// Handle a [`Request`]
     pub fn cycle(&mut self) {
+        if self.status_req_receiver.try_recv().is_ok() {
+            let _ = self.status_sender.send(self.status);
+            return;
+        }
         match self.estimator_receiver.try_recv() {
             Ok(value) => {
                 self.send_tickets(value);
@@ -76,9 +80,6 @@ impl Server {
                     self.handle_request(rq);
                 }
             }
-        }
-        if self.status_req_receiver.try_recv().is_ok() {
-            let _ = self.status_sender.send(self.status);
         }
     }
 
