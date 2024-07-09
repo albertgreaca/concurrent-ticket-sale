@@ -45,7 +45,7 @@ impl Server {
         estimator_sender: Sender<u32>,
     ) -> Server {
         let id = Uuid::new_v4();
-        let num_tickets = (database.lock().get_num_available() as f64).sqrt().ceil() as u32;
+        let num_tickets = (database.lock().get_num_available() as f64).sqrt() as u32;
         let tickets = database.lock().allocate(num_tickets);
         Self {
             id,
@@ -67,9 +67,6 @@ impl Server {
 
     /// Handle a [`Request`]
     pub fn cycle(&mut self) {
-        if self.status_req_receiver.try_recv().is_ok() {
-            let _ = self.status_sender.send(self.status);
-        }
         match self.estimator_receiver.try_recv() {
             Ok(value) => {
                 self.send_tickets(value);
@@ -79,6 +76,9 @@ impl Server {
                     self.handle_request(rq)
                 }
             }
+        }
+        if self.status_req_receiver.try_recv().is_ok() {
+            let _ = self.status_sender.send(self.status);
         }
     }
 
