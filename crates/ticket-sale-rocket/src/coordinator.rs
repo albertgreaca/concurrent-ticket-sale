@@ -106,7 +106,9 @@ impl Coordinator {
                 // Get the channel for the server activation and activate the server
                 let _ = self.server_sender_de_activation_list[self.no_active_servers as usize]
                     .send(true);
-
+                self.server_thread_list[self.no_active_servers as usize]
+                    .thread()
+                    .unpark();
                 self.no_active_servers += 1;
             }
 
@@ -196,6 +198,9 @@ impl Coordinator {
     pub fn shutdown(&mut self) {
         for sender in self.server_sender_shutdown_list.iter() {
             let _ = sender.send(true);
+        }
+        for thread in self.server_thread_list.iter() {
+            thread.thread().unpark();
         }
         for thread in self.server_thread_list.drain(..) {
             thread.join().unwrap();

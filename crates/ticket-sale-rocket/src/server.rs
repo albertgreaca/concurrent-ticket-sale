@@ -2,6 +2,7 @@
 #![allow(clippy::too_many_arguments)]
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
 use std::{collections::HashMap, sync::mpsc::Receiver};
 
@@ -220,6 +221,16 @@ impl Server {
                     self.activate()
                 } else {
                     self.deactivate()
+                }
+            }
+            if self.status == 2 {
+                thread::park();
+                while let Ok(value) = self.de_activate_receiver.try_recv() {
+                    if value {
+                        self.activate()
+                    } else {
+                        self.deactivate()
+                    }
                 }
             }
         }
