@@ -54,8 +54,15 @@ impl Estimator {
             }
             sum -= self.tickets_in_server[server];
             let _ = sender.send(sum + tickets);
-            *self.tickets_in_server.get_mut(server).unwrap() =
-                self.receive_from_server.recv().unwrap();
+            let mut guard3 = self.coordinator.lock();
+            if guard3.get_status(*server) != 2 {
+                *self.tickets_in_server.get_mut(server).unwrap() =
+                    self.receive_from_server.recv().unwrap();
+            } else {
+                *self.tickets_in_server.get_mut(server).unwrap() = 0;
+            }
+            drop(guard3);
+
             sum += self.tickets_in_server[server];
             sleep(Duration::from_secs(
                 (self.roundtrip_secs / servers_senders.len() as u32) as u64,
