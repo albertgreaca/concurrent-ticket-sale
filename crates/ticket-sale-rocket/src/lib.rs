@@ -39,13 +39,11 @@ pub fn launch(config: &Config) -> Balancer {
         todo!("Bonus not implemented!")
     }
     let (est_send, est_rec) = channel();
-    let (est_term_send, est_term_rec) = channel();
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
     let coordinator = Arc::new(Mutex::new(Coordinator::new(
         config.timeout,
         database.clone(),
         est_send,
-        est_term_send,
     )));
     coordinator.lock().scale_to(config.initial_servers);
     let estimator = Arc::new(Mutex::new(Estimator::new(
@@ -53,7 +51,6 @@ pub fn launch(config: &Config) -> Balancer {
         coordinator.clone(),
         config.estimator_roundtrip_time,
         est_rec,
-        est_term_rec,
     )));
     let estimator2 = estimator.clone();
     let other_thread = thread::spawn(move || {

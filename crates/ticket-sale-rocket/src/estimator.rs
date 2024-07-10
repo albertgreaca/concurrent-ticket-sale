@@ -1,6 +1,5 @@
 //! Implementation of the estimator
 
-use std::collections::HashSet;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::{collections::HashMap, thread::sleep, time::Duration};
@@ -18,7 +17,6 @@ pub struct Estimator {
     roundtrip_secs: u32,
     tickets_in_server: HashMap<Uuid, u32>,
     receive_from_server: Receiver<u32>,
-    terminated_servers: Receiver<Uuid>,
 }
 
 impl Estimator {
@@ -33,7 +31,6 @@ impl Estimator {
         coordinator: Arc<Mutex<Coordinator>>,
         roundtrip_secs: u32,
         receive_from_server: Receiver<u32>,
-        terminated_servers: Receiver<Uuid>,
     ) -> Self {
         Self {
             coordinator,
@@ -41,7 +38,6 @@ impl Estimator {
             roundtrip_secs,
             tickets_in_server: HashMap::new(),
             receive_from_server,
-            terminated_servers,
         }
     }
 
@@ -52,22 +48,20 @@ impl Estimator {
         let guard = self.database.lock();
         let tickets = guard.get_num_available();
         drop(guard);
-        let mut term = HashSet::new();
         for (server, sender) in &servers_senders {
-            while let Ok(value) = self.terminated_servers.try_recv() {
-                term.insert(value);
-            }
             if !self.tickets_in_server.contains_key(server) {
                 self.tickets_in_server.insert(*server, 0);
             }
             sum -= self.tickets_in_server[server];
-            if term.contains(server) {
-                *self.tickets_in_server.get_mut(server).unwrap() = 0;
-            } else {
-                let _ = sender.send(sum + tickets);
+            let _ = sender.send(sum + tickets);
+            let mut guard3 = self.coordinator.lock();
+            if guard3.get_status(*server) != 2 {
                 *self.tickets_in_server.get_mut(server).unwrap() =
                     self.receive_from_server.recv().unwrap();
+            } else {
+                *self.tickets_in_server.get_mut(server).unwrap() = 0;
             }
+            drop(guard3);
 
             sum += self.tickets_in_server[server];
             sleep(Duration::from_secs(

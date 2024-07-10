@@ -31,7 +31,6 @@ pub struct Coordinator {
     server_map_status: HashMap<Uuid, u32>,
     pub no_active_servers: u32,
     estimator_sender: Sender<u32>,
-    estimator_terminated_sender: Sender<Uuid>,
 }
 
 impl Coordinator {
@@ -40,7 +39,6 @@ impl Coordinator {
         reservation_timeout: u32,
         database: Arc<Mutex<Database>>,
         estimator_sender: Sender<u32>,
-        estimator_terminated_sender: Sender<Uuid>,
     ) -> Self {
         Self {
             reservation_timeout,
@@ -56,7 +54,6 @@ impl Coordinator {
             server_map_status: HashMap::new(),
             no_active_servers: 0,
             estimator_sender,
-            estimator_terminated_sender,
         }
     }
 
@@ -123,7 +120,6 @@ impl Coordinator {
                     server_shut_rec,
                     server_status_send,
                     self.estimator_sender.clone(),
-                    self.estimator_terminated_sender.clone(),
                 );
                 let server_id = server.id;
 

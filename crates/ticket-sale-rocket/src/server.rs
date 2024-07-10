@@ -29,7 +29,6 @@ pub struct Server {
     shutdown_receiver: Receiver<bool>,
     status_sender: Sender<u32>,
     estimator_sender: Sender<u32>,
-    estimator_terminated_sender: Sender<Uuid>,
 }
 
 impl Server {
@@ -43,7 +42,6 @@ impl Server {
         shutdown_receiver: Receiver<bool>,
         status_sender: Sender<u32>,
         estimator_sender: Sender<u32>,
-        estimator_terminated_sender: Sender<Uuid>,
     ) -> Server {
         let id = Uuid::new_v4();
         let num_tickets = (database.lock().get_num_available() as f64).sqrt() as u32;
@@ -62,7 +60,6 @@ impl Server {
             shutdown_receiver,
             status_sender,
             estimator_sender,
-            estimator_terminated_sender,
         }
     }
 
@@ -97,7 +94,6 @@ impl Server {
             self.database.lock().deallocate(self.tickets.as_slice());
             self.tickets.clear();
             let _ = self.status_sender.send(2);
-            let _ = self.estimator_terminated_sender.send(self.id);
             self.status = 2;
         }
         match rq.kind() {
@@ -142,7 +138,6 @@ impl Server {
                                 self.database.lock().deallocate(self.tickets.as_slice());
                                 self.tickets.clear();
                                 let _ = self.status_sender.send(2);
-                                let _ = self.estimator_terminated_sender.send(self.id);
                                 self.status = 2;
                             }
                             rq.respond_with_int(ticket);
@@ -173,7 +168,6 @@ impl Server {
                                 self.database.lock().deallocate(self.tickets.as_slice());
                                 self.tickets.clear();
                                 let _ = self.status_sender.send(2);
-                                let _ = self.estimator_terminated_sender.send(self.id);
                                 self.status = 2;
                             }
                             rq.respond_with_int(ticket);
@@ -251,7 +245,6 @@ impl Server {
         self.tickets.clear();
         if self.reserved.is_empty() {
             let _ = self.status_sender.send(2);
-            let _ = self.estimator_terminated_sender.send(self.id);
             self.status = 2;
         }
     }
