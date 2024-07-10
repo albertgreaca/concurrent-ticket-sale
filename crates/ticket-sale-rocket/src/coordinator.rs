@@ -170,13 +170,14 @@ impl Coordinator {
 
     /// Get estimator sender channels for servers that aren't completely terminated
     pub fn get_estimator_senders(&self) -> Vec<Sender<u32>> {
-        let mut senders = Vec::new();
+        /*let mut senders = Vec::new();
         for (i, sender) in self.server_sender_est_list.iter().enumerate() {
             if self.get_status(self.server_id_list[i]) != 2 {
                 senders.push((*sender).clone());
             }
         }
-        senders
+        senders*/
+        self.server_sender_est_list.clone()
     }
 
     /// Get ids of servers that aren't completely terminated
