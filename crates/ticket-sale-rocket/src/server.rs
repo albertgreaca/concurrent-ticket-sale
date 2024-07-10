@@ -18,7 +18,7 @@ pub struct Server {
     estimate: u32,
     /// The database
     database: Arc<Mutex<Database>>,
-    pub status: u32,
+    status: u32,
     tickets: Vec<u32>,
     reserved: HashMap<Uuid, (u32, Instant)>,
     timeout: u32,
@@ -65,7 +65,6 @@ impl Server {
         }
     }
 
-    /// Handle a [`Request`]
     pub fn cycle(&mut self) {
         if self.status_req_receiver.try_recv().is_ok() {
             let _ = self.status_sender.send(self.status);
@@ -82,7 +81,7 @@ impl Server {
             }
         }
     }
-
+    /// Handle a [`Request`]
     pub fn handle_request(&mut self, mut rq: Request) {
         self.reserved.retain(|_, (ticket, time)| {
             if time.elapsed().as_secs() > self.timeout as u64 {
@@ -107,7 +106,6 @@ impl Server {
                 rq.respond_with_int(self.get_available_tickets());
             }
             RequestKind::ReserveTicket => {
-                rq.set_server_id(self.id);
                 let bloke = rq.customer_id();
                 if self.reserved.contains_key(&bloke) {
                     rq.respond_with_err("one reservation already present");
@@ -132,7 +130,6 @@ impl Server {
                 rq.respond_with_int(ticket);
             }
             RequestKind::BuyTicket => {
-                rq.set_server_id(self.id);
                 let ticket_option = rq.read_u32();
                 if ticket_option.is_none() {
                     rq.respond_with_err("no ticket");
@@ -157,7 +154,6 @@ impl Server {
                 }
             }
             RequestKind::AbortPurchase => {
-                rq.set_server_id(self.id);
                 let ticket_option = rq.read_u32();
                 if ticket_option.is_none() {
                     rq.respond_with_err("no ticket");

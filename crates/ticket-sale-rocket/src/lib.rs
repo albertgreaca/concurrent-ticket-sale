@@ -40,8 +40,12 @@ pub fn launch(config: &Config) -> Balancer {
     }
     let (est_send, est_rec) = channel();
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
-    let coordinator = Arc::new(Coordinator::new(config.timeout, database.clone(), est_send));
-    coordinator.scale_to(config.initial_servers);
+    let coordinator = Arc::new(Mutex::new(Coordinator::new(
+        config.timeout,
+        database.clone(),
+        est_send,
+    )));
+    coordinator.lock().scale_to(config.initial_servers);
     let estimator = Arc::new(Mutex::new(Estimator::new(
         database.clone(),
         coordinator.clone(),

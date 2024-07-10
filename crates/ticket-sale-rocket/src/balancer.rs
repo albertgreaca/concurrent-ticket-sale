@@ -14,7 +14,7 @@ use super::estimator::Estimator;
 /// exposed from the crate root (to be used from the tester as
 /// `ticket_sale_rocket::Balancer`).
 pub struct Balancer {
-    coordinator: Arc<Coordinator>,
+    coordinator: Arc<Mutex<Coordinator>>,
     estimator: Arc<Mutex<Estimator>>,
     other_thread: JoinHandle<()>,
 }
@@ -22,7 +22,7 @@ pub struct Balancer {
 impl Balancer {
     /// Create a new [`Balancer`]
     pub fn new(
-        coordinator: Arc<Coordinator>,
+        coordinator: Arc<Mutex<Coordinator>>,
         estimator: Arc<Mutex<Estimator>>,
         other_thread: JoinHandle<()>,
     ) -> Self {
@@ -41,12 +41,12 @@ impl RequestHandler for Balancer {
     fn handle(&self, mut rq: Request) {
         match rq.kind() {
             RequestKind::GetNumServers => {
-                rq.respond_with_int(self.coordinator.get_num_active_servers());
+                rq.respond_with_int(self.coordinator.lock().get_num_active_servers());
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
                     Some(n) => {
-                        self.coordinator.scale_to(n);
+                        self.coordinator.lock().scale_to(n);
                         rq.respond_with_int(n);
                     }
                     None => {
@@ -55,7 +55,9 @@ impl RequestHandler for Balancer {
                 };
             }
             RequestKind::GetServers => {
-                rq.respond_with_server_list(self.coordinator.get_active_servers().as_slice());
+                rq.respond_with_server_list(
+                    self.coordinator.lock().get_active_servers().as_slice(),
+                );
             }
             RequestKind::Debug => {
                 // 📌 Hint: You can use `rq.url()` and `rq.method()` to
@@ -66,25 +68,28 @@ impl RequestHandler for Balancer {
                 let server_no = match rq.server_id() {
                     Some(n) => n,
                     None => {
-                        if *self.coordinator.no_active_servers.lock() == 0 {
+                        if self.coordinator.lock().no_active_servers == 0 {
                             rq.respond_with_err("no server available");
                             return;
                         }
-                        let x = self.coordinator.get_random_server();
+                        let x = self.coordinator.lock().get_random_server();
                         rq.set_server_id(x);
                         x
                     }
                 };
-                let status = self.coordinator.get_status(server_no);
+                let status = self.coordinator.lock().get_status(server_no);
                 if (*rq.kind() != RequestKind::ReserveTicket && status == 1) || status == 0 {
-                    let server_sender = self.coordinator.get_balancer_server_sender(server_no);
+                    let server_sender = self
+                        .coordinator
+                        .lock()
+                        .get_balancer_server_sender(server_no);
                     let _ = server_sender.send(rq);
                 } else {
-                    if *self.coordinator.no_active_servers.lock() == 0 {
+                    if self.coordinator.lock().no_active_servers == 0 {
                         rq.respond_with_err("no server available");
                         return;
                     }
-                    let x = self.coordinator.get_random_server();
+                    let x = self.coordinator.lock().get_random_server();
                     rq.set_server_id(x);
                     rq.respond_with_err("server terminating");
                 }
@@ -95,6 +100,6 @@ impl RequestHandler for Balancer {
     fn shutdown(self) {
         drop(self.estimator);
         self.other_thread.join().unwrap();
-        self.coordinator.shutdown();
+        self.coordinator.lock().shutdown();
     }
 }
