@@ -41,22 +41,17 @@ impl Estimator {
         }
     }
 
-    pub fn run(&mut self) {
+    pub fn run(&mut self, mut sum: u32) -> u32 {
         let guard2 = self.coordinator.lock();
         let servers_senders = guard2.get_estimator().clone();
         drop(guard2);
         let guard = self.database.lock();
         let tickets = guard.get_num_available();
         drop(guard);
-        let mut sum = 0;
-        for (server, _) in &servers_senders {
-            if self.tickets_in_server.contains_key(server) {
-                sum += self.tickets_in_server[server];
-            } else {
+        for (server, sender) in &servers_senders {
+            if !self.tickets_in_server.contains_key(server) {
                 self.tickets_in_server.insert(*server, 0);
             }
-        }
-        for (server, sender) in &servers_senders {
             sum -= self.tickets_in_server[server];
             let _ = sender.send(sum + tickets);
             *self.tickets_in_server.get_mut(server).unwrap() =
@@ -66,5 +61,6 @@ impl Estimator {
                 (self.roundtrip_secs / servers_senders.len() as u32) as u64,
             ));
         }
+        sum
     }
 }

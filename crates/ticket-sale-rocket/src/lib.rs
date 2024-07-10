@@ -54,8 +54,9 @@ pub fn launch(config: &Config) -> Balancer {
     )));
     let estimator2 = estimator.clone();
     let other_thread = thread::spawn(move || {
+        let mut sum = 0;
         while Arc::strong_count(&estimator2) > 1 {
-            estimator2.lock().run();
+            sum = estimator2.lock().run(sum);
         }
     });
     Balancer::new(coordinator.clone(), estimator, other_thread)
