@@ -221,9 +221,9 @@ impl Server {
                 }
             }
             if self.status == 2 {
-                while let Ok(rq) = self.balancer_receiver.try_recv() {
+                /*while let Ok(rq) = self.balancer_receiver.try_recv() {
                     self.handle_request(rq);
-                }
+                }*/
                 thread::park();
                 while let Ok(value) = self.de_activate_receiver.try_recv() {
                     if value {
