@@ -66,10 +66,6 @@ impl Server {
     }
 
     pub fn cycle(&mut self) {
-        if self.status_req_receiver.try_recv().is_ok() {
-            let _ = self.status_sender.send(self.status);
-            return;
-        }
         match self.estimator_receiver.try_recv() {
             Ok(value) => {
                 self.send_tickets(value);
@@ -216,7 +212,10 @@ impl Server {
             if self.shutdown_receiver.try_recv().is_ok() {
                 break;
             }
-            if let Ok(value) = self.de_activate_receiver.try_recv() {
+            while self.status_req_receiver.try_recv().is_ok() {
+                let _ = self.status_sender.send(self.status);
+            }
+            while let Ok(value) = self.de_activate_receiver.try_recv() {
                 if value {
                     self.activate()
                 } else {
