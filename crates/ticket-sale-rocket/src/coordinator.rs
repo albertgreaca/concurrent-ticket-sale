@@ -25,10 +25,10 @@ pub struct Coordinator {
     server_sender_est_list: Vec<Sender<u32>>,
     server_sender_de_activation_list: Vec<Sender<bool>>,
     server_sender_shutdown_list: Vec<Sender<bool>>,
-    server_status_request_list: Vec<Sender<u32>>,
     server_status_receiver_list: Vec<Receiver<u32>>,
     server_thread_list: Vec<JoinHandle<()>>,
     server_map_index: HashMap<Uuid, usize>,
+    server_map_status: HashMap<Uuid, u32>,
     pub no_active_servers: u32,
     estimator_sender: Sender<u32>,
 }
@@ -48,10 +48,10 @@ impl Coordinator {
             server_sender_est_list: Vec::new(),
             server_sender_de_activation_list: Vec::new(),
             server_sender_shutdown_list: Vec::new(),
-            server_status_request_list: Vec::new(),
             server_status_receiver_list: Vec::new(),
             server_thread_list: Vec::new(),
             server_map_index: HashMap::new(),
+            server_map_status: HashMap::new(),
             no_active_servers: 0,
             estimator_sender,
         }
@@ -68,26 +68,15 @@ impl Coordinator {
     }
 
     /// Get the status of the server with the given id
-    pub fn get_status(&self, id: Uuid) -> u32 {
-        // Send a request for the status
-        if self.server_map_index.contains_key(&id) {
-            if self.server_map_index[&id] < self.no_active_servers as usize {
-                return 0;
+    pub fn get_status(&mut self, id: Uuid) -> u32 {
+        while let Ok(value) =
+            self.server_status_receiver_list[self.server_map_index[&id]].try_recv()
+        {
+            if let Some(value2) = self.server_map_status.get_mut(&id) {
+                *value2 = value;
             }
-            let _ = self.server_status_request_list[self.server_map_index[&id]].send(0);
-        } else {
-            // Should never happen
-            let _ = self.server_status_request_list[0].send(0);
         }
-        // Wait for the server to return its status
-        if self.server_map_index.contains_key(&id) {
-            self.server_status_receiver_list[self.server_map_index[&id]]
-                .recv()
-                .unwrap()
-        } else {
-            // Should never happen
-            self.server_status_receiver_list[0].recv().unwrap()
-        }
+        self.server_map_status[&id]
     }
 
     /// Get the number of servers that are non-terminating
@@ -119,7 +108,6 @@ impl Coordinator {
                 let (server_est_send, server_est_rec) = channel();
                 let (server_act_send, server_act_rec) = channel();
                 let (server_shut_send, server_shut_rec) = channel();
-                let (server_status_req_send, server_status_req_rec) = channel();
                 let (server_status_send, server_status_rec) = channel();
 
                 // Create the server
@@ -130,7 +118,6 @@ impl Coordinator {
                     server_est_rec,
                     server_act_rec,
                     server_shut_rec,
-                    server_status_req_rec,
                     server_status_send,
                     self.estimator_sender.clone(),
                 );
@@ -146,10 +133,10 @@ impl Coordinator {
                 self.server_sender_est_list.push(server_est_send);
                 self.server_sender_de_activation_list.push(server_act_send);
                 self.server_sender_shutdown_list.push(server_shut_send);
-                self.server_status_request_list.push(server_status_req_send);
                 self.server_status_receiver_list.push(server_status_rec);
                 self.server_map_index
                     .insert(server_id, self.no_active_servers as usize);
+                self.server_map_status.insert(server_id, 0);
                 self.no_active_servers += 1;
             }
         }
@@ -175,7 +162,7 @@ impl Coordinator {
 
     /// Get estimator ids and sender channels for servers that aren't completely
     /// terminated
-    pub fn get_estimator(&self) -> Vec<(Uuid, Sender<u32>)> {
+    pub fn get_estimator(&mut self) -> Vec<(Uuid, Sender<u32>)> {
         let mut server_sender = Vec::new();
         for i in 0..self.server_id_list.len() {
             if self.get_status(self.server_id_list[i]) != 2 {

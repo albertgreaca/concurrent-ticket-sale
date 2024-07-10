@@ -42,7 +42,7 @@ impl Estimator {
     }
 
     pub fn run(&mut self, mut sum: u32) -> u32 {
-        let guard2 = self.coordinator.lock();
+        let mut guard2 = self.coordinator.lock();
         let servers_senders = guard2.get_estimator().clone();
         drop(guard2);
         let guard = self.database.lock();

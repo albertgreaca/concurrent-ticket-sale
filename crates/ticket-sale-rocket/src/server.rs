@@ -27,7 +27,6 @@ pub struct Server {
     estimator_receiver: Receiver<u32>,
     de_activate_receiver: Receiver<bool>,
     shutdown_receiver: Receiver<bool>,
-    status_req_receiver: Receiver<u32>,
     status_sender: Sender<u32>,
     estimator_sender: Sender<u32>,
 }
@@ -41,7 +40,6 @@ impl Server {
         estimator_receiver: Receiver<u32>,
         de_activate_receiver: Receiver<bool>,
         shutdown_receiver: Receiver<bool>,
-        status_req_receiver: Receiver<u32>,
         status_sender: Sender<u32>,
         estimator_sender: Sender<u32>,
     ) -> Server {
@@ -60,7 +58,6 @@ impl Server {
             estimator_receiver,
             de_activate_receiver,
             shutdown_receiver,
-            status_req_receiver,
             status_sender,
             estimator_sender,
         }
@@ -96,6 +93,7 @@ impl Server {
         if self.reserved.is_empty() && self.status == 1 {
             self.database.lock().deallocate(self.tickets.as_slice());
             self.tickets.clear();
+            let _ = self.status_sender.send(2);
             self.status = 2;
         }
         match rq.kind() {
@@ -139,6 +137,7 @@ impl Server {
                             if self.reserved.is_empty() && self.status == 1 {
                                 self.database.lock().deallocate(self.tickets.as_slice());
                                 self.tickets.clear();
+                                let _ = self.status_sender.send(2);
                                 self.status = 2;
                             }
                             rq.respond_with_int(ticket);
@@ -168,6 +167,7 @@ impl Server {
                             if self.reserved.is_empty() && self.status == 1 {
                                 self.database.lock().deallocate(self.tickets.as_slice());
                                 self.tickets.clear();
+                                let _ = self.status_sender.send(2);
                                 self.status = 2;
                             }
                             rq.respond_with_int(ticket);
@@ -213,9 +213,6 @@ impl Server {
             if self.shutdown_receiver.try_recv().is_ok() {
                 break;
             }
-            while self.status_req_receiver.try_recv().is_ok() {
-                let _ = self.status_sender.send(self.status);
-            }
             while let Ok(value) = self.de_activate_receiver.try_recv() {
                 if value {
                     self.activate()
@@ -237,14 +234,17 @@ impl Server {
     }
 
     pub fn activate(&mut self) {
+        let _ = self.status_sender.send(0);
         self.status = 0;
     }
 
     pub fn deactivate(&mut self) {
+        let _ = self.status_sender.send(1);
         self.status = 1;
         self.database.lock().deallocate(self.tickets.as_slice());
         self.tickets.clear();
         if self.reserved.is_empty() {
+            let _ = self.status_sender.send(2);
             self.status = 2;
         }
     }
