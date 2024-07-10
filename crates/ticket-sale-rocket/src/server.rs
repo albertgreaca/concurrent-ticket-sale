@@ -221,7 +221,7 @@ impl Server {
                 }
             }
             if self.status == 2 {
-                thread::park();
+                //thread::park();
                 while let Ok(value) = self.de_activate_receiver.try_recv() {
                     if value {
                         self.activate()
