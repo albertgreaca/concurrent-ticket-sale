@@ -168,26 +168,19 @@ impl Coordinator {
         self.server_id_list[0..n].to_vec()
     }
 
-    /// Get estimator sender channels for servers that aren't completely terminated
-    pub fn get_estimator_senders(&self) -> Vec<Sender<u32>> {
-        let mut senders = Vec::new();
+    /// Get estimator ids and sender channels for servers that aren't completely
+    /// terminated
+    pub fn get_estimator(&self) -> Vec<(Uuid, Sender<u32>)> {
+        let mut server_sender = Vec::new();
         for i in 0..self.server_id_list.len() {
             if self.get_status(self.server_id_list[i]) != 2 {
-                senders.push(self.server_sender_est_list[i].clone());
+                server_sender.push((
+                    self.server_id_list[i],
+                    self.server_sender_est_list[i].clone(),
+                ));
             }
         }
-        senders
-    }
-
-    /// Get ids of servers that aren't completely terminated
-    pub fn get_estimator_servers(&self) -> Vec<Uuid> {
-        let mut servers = Vec::new();
-        for i in 0..self.server_id_list.len() {
-            if self.get_status(self.server_id_list[i]) != 2 {
-                servers.push(self.server_id_list[i]);
-            }
-        }
-        servers
+        server_sender
     }
 
     /// Get the id of a random non-terminating server

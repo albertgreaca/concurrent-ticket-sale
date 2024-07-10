@@ -43,28 +43,27 @@ impl Estimator {
 
     pub fn run(&mut self) {
         let guard2 = self.coordinator.lock();
-        let servers = guard2.get_estimator_servers().clone();
-        let senders = guard2.get_estimator_senders().clone();
+        let servers_senders = guard2.get_estimator().clone();
         drop(guard2);
         let guard = self.database.lock();
         let tickets = guard.get_num_available();
         drop(guard);
         let mut sum = 0;
-        for server in &servers {
+        for (server, _) in &servers_senders {
             if self.tickets_in_server.contains_key(server) {
                 sum += self.tickets_in_server[server];
             } else {
                 self.tickets_in_server.insert(*server, 0);
             }
         }
-        for (server, sender) in servers.iter().zip(senders.iter()) {
+        for (server, sender) in &servers_senders {
             sum -= self.tickets_in_server[server];
             let _ = sender.send(sum + tickets);
             *self.tickets_in_server.get_mut(server).unwrap() =
                 self.receive_from_server.recv().unwrap();
             sum += self.tickets_in_server[server];
             sleep(Duration::from_secs(
-                (self.roundtrip_secs / servers.len() as u32) as u64,
+                (self.roundtrip_secs / servers_senders.len() as u32) as u64,
             ));
         }
     }
