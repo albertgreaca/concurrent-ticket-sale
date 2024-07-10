@@ -71,6 +71,9 @@ impl Coordinator {
     pub fn get_status(&self, id: Uuid) -> u32 {
         // Send a request for the status
         if self.server_map_index.contains_key(&id) {
+            if self.server_map_index[&id] < self.no_active_servers as usize {
+                return 0;
+            }
             let _ = self.server_status_request_list[self.server_map_index[&id]].send(0);
         } else {
             // Should never happen
