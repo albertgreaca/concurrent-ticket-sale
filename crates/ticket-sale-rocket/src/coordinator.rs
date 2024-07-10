@@ -182,13 +182,14 @@ impl Coordinator {
 
     /// Get ids of servers that aren't completely terminated
     pub fn get_estimator_servers(&self) -> Vec<Uuid> {
-        let mut servers = Vec::new();
+        /*let mut servers = Vec::new();
         for (i, sender) in self.server_id_list.iter().enumerate() {
             if self.get_status(self.server_id_list[i]) != 2 {
                 servers.push(*sender);
             }
         }
-        servers
+        servers*/
+        self.server_id_list.clone()
     }
 
     /// Get the id of a random non-terminating server
