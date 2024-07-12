@@ -175,10 +175,10 @@ impl Coordinator {
     /// terminated
     pub fn get_estimator(&mut self) -> (Vec<Uuid>, Vec<Sender<HighPriorityServerRequest>>) {
         self.update_servers();
-        return (
+        (
             self.server_id_list.clone(),
             self.high_priority_sender_list.clone(),
-        );
+        )
     }
 
     /// Shut down all servers

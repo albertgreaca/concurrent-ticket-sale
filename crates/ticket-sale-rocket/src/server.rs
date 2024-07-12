@@ -83,22 +83,7 @@ impl Server {
         loop {
             self.cycle();
             if self.status == 2 {
-                let high_priority_channel = self.get_high_priority_receiver();
-                if let Ok(value) = high_priority_channel.try_recv() {
-                    match value {
-                        HighPriorityServerRequest::DeActivate { activate } => {
-                            if activate {
-                                self.activate()
-                            } else {
-                                self.deactivate()
-                            }
-                        }
-                        HighPriorityServerRequest::Shutdown => self.status = 3,
-                        HighPriorityServerRequest::Estimate { tickets } => {
-                            self.send_tickets(tickets);
-                        }
-                    }
-                }
+                while self.terminate_cycle() {}
                 if self.status == 2 {
                     let high_priority_channel = self.high_priority.take().unwrap();
                     drop(high_priority_channel);
@@ -119,6 +104,28 @@ impl Server {
             if self.status == 3 {
                 break;
             }
+        }
+    }
+
+    pub fn terminate_cycle(&mut self) -> bool {
+        let high_priority_channel = self.get_high_priority_receiver();
+        if let Ok(value) = high_priority_channel.try_recv() {
+            match value {
+                HighPriorityServerRequest::DeActivate { activate } => {
+                    if activate {
+                        self.activate()
+                    } else {
+                        self.deactivate()
+                    }
+                }
+                HighPriorityServerRequest::Shutdown => self.status = 3,
+                HighPriorityServerRequest::Estimate { tickets } => {
+                    self.send_tickets(tickets);
+                }
+            }
+            true
+        } else {
+            false
         }
     }
 
@@ -150,10 +157,16 @@ impl Server {
     }
 
     pub fn activate(&mut self) {
+        if self.status == 3 {
+            return;
+        }
         self.status = 0;
     }
 
     pub fn deactivate(&mut self) {
+        if self.status == 3 {
+            return;
+        }
         self.status = 1;
         if !self.tickets.is_empty() {
             self.database.lock().deallocate(self.tickets.as_slice());
