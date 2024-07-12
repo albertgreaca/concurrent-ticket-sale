@@ -6,12 +6,12 @@ use std::time::Instant;
 
 use crossbeam::channel::{Receiver, Sender};
 use parking_lot::Mutex;
-use rand::Rng;
 use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
 use super::database::Database;
 use super::serverrequest::HighPriorityServerRequest;
+use crate::coordinator::Coordinator;
 
 /// A server in the ticket sales system
 pub struct Server {
@@ -28,8 +28,7 @@ pub struct Server {
     high_priority: Option<Receiver<HighPriorityServerRequest>>,
     terminated_sender: Sender<Uuid>,
     estimator_sender: Sender<u32>,
-    no_active_servers: Arc<Mutex<u32>>,
-    server_id_list: Arc<Mutex<Vec<Uuid>>>,
+    coordinator: Arc<Mutex<Coordinator>>,
 }
 
 impl Server {
@@ -41,8 +40,7 @@ impl Server {
         high_priority: Receiver<HighPriorityServerRequest>,
         terminated_sender: Sender<Uuid>,
         estimator_sender: Sender<u32>,
-        no_active_servers: Arc<Mutex<u32>>,
-        server_id_list: Arc<Mutex<Vec<Uuid>>>,
+        coordinator: Arc<Mutex<Coordinator>>,
     ) -> Server {
         let id = Uuid::new_v4();
         let num_tickets = (database.lock().get_num_available() as f64).sqrt() as u32;
@@ -59,8 +57,7 @@ impl Server {
             high_priority: Some(high_priority),
             terminated_sender,
             estimator_sender,
-            server_id_list,
-            no_active_servers,
+            coordinator,
         }
     }
 
@@ -108,10 +105,9 @@ impl Server {
 
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
-                        let mut rng = rand::thread_rng();
-                        let x = *self.no_active_servers.lock();
-                        let new_serv = self.server_id_list.lock()[rng.gen_range(0..x) as usize];
-                        rq.set_server_id(new_serv);
+                        let coordinator_guard = self.coordinator.lock();
+                        let x = coordinator_guard.get_random_server();
+                        rq.set_server_id(x);
                         rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                     }
                     drop(low_priority_channel);
@@ -234,10 +230,9 @@ impl Server {
                     return;
                 }
                 if self.status == 1 {
-                    let mut rng = rand::thread_rng();
-                    let x = *self.no_active_servers.lock();
-                    let new_serv = self.server_id_list.lock()[rng.gen_range(0..x) as usize];
-                    rq.set_server_id(new_serv);
+                    let coordinator_guard = self.coordinator.lock();
+                    let x = coordinator_guard.get_random_server();
+                    rq.set_server_id(x);
                     rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                     return;
                 }

@@ -1,11 +1,8 @@
 //! Implementation of the load balancer
-
-use std::io::{self, Write};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use parking_lot::Mutex;
-use rand::Rng;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 
 use super::coordinator::Coordinator;
@@ -48,15 +45,15 @@ impl RequestHandler for Balancer {
             }
             RequestKind::GetServers => {
                 // get the servers with status 0
-                rq.respond_with_server_list(
-                    self.coordinator.lock().get_active_servers().as_slice(),
-                );
+                rq.respond_with_server_list(self.coordinator.lock().get_active_servers());
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
                     Some(n) => {
                         // set number of servers with status 0 to n
-                        self.coordinator.lock().scale_to(n);
+                        self.coordinator
+                            .lock()
+                            .scale_to(n, self.coordinator.clone());
                         rq.respond_with_int(n);
                     }
                     None => {
@@ -75,7 +72,7 @@ impl RequestHandler for Balancer {
                 let server_no = match rq.server_id() {
                     Some(n) => n,
                     None => {
-                        if *coordinator_guard.no_active_servers.lock() == 0 {
+                        if coordinator_guard.no_active_servers == 0 {
                             rq.respond_with_err("no server available");
                             return;
                         }
@@ -86,11 +83,8 @@ impl RequestHandler for Balancer {
                 };
                 coordinator_guard.update_servers();
                 if !coordinator_guard.map_id_index.contains_key(&server_no) {
-                    let mut rng = rand::thread_rng();
-                    let x = *coordinator_guard.no_active_servers.lock();
-                    let new_serv =
-                        coordinator_guard.server_id_list.lock()[rng.gen_range(0..x) as usize];
-                    rq.set_server_id(new_serv);
+                    let x = coordinator_guard.get_random_server();
+                    rq.set_server_id(x);
                     rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                 } else {
                     // forward the request to the server

@@ -45,7 +45,9 @@ pub fn launch(config: &Config) -> Balancer {
         database.clone(),
         est_send,
     )));
-    coordinator.lock().scale_to(config.initial_servers);
+    coordinator
+        .lock()
+        .scale_to(config.initial_servers, coordinator.clone());
     let estimator = Arc::new(Mutex::new(Estimator::new(
         database.clone(),
         coordinator.clone(),

@@ -22,9 +22,9 @@ pub struct Coordinator {
     /// To be handed over to new servers.
     database: Arc<Mutex<Database>>,
 
-    pub no_active_servers: Arc<Mutex<u32>>,
+    pub no_active_servers: u32,
     pub map_id_index: HashMap<Uuid, usize>,
-    pub server_id_list: Arc<Mutex<Vec<Uuid>>>,
+    pub server_id_list: Vec<Uuid>,
     low_priority_sender_list: Vec<Sender<Request>>,
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,
@@ -46,9 +46,9 @@ impl Coordinator {
         Self {
             reservation_timeout,
             database,
-            no_active_servers: Arc::new(Mutex::new(0)),
+            no_active_servers: 0,
             map_id_index: HashMap::new(),
-            server_id_list: Arc::new(Mutex::new(Vec::new())),
+            server_id_list: Vec::new(),
             low_priority_sender_list: Vec::new(),
             high_priority_sender_list: Vec::new(),
             thread_list: Vec::new(),
@@ -60,19 +60,18 @@ impl Coordinator {
 
     /// Get the number of servers that are non-terminating
     pub fn get_num_active_servers(&self) -> u32 {
-        *self.no_active_servers.lock()
+        self.no_active_servers
     }
 
     /// Get ids corresponding to non-terminating servers
-    pub fn get_active_servers(&self) -> Vec<Uuid> {
-        let n = *self.no_active_servers.lock() as usize;
-        self.server_id_list.lock()[0..n].to_vec()
+    pub fn get_active_servers(&self) -> &[Uuid] {
+        &self.server_id_list[0..self.no_active_servers as usize]
     }
 
     /// Get the id of a random non-terminating server
     pub fn get_random_server(&self) -> Uuid {
         let mut rng = rand::thread_rng();
-        self.server_id_list.lock()[rng.gen_range(0..*self.no_active_servers.lock()) as usize]
+        self.server_id_list[rng.gen_range(0..self.no_active_servers) as usize]
     }
 
     /// Get the channel for sending user requests to the server with the given id
@@ -89,22 +88,22 @@ impl Coordinator {
         while let Ok(uuid) = self.terminated_receiver.try_recv() {
             // find the position of a terminating server
             let index = self.map_id_index[&uuid];
-            let n = self.server_id_list.lock().len();
+            let n = self.server_id_list.len();
 
             // if its not the last one, swap it with the last one
             if index != n - 1 {
-                self.server_id_list.lock().swap(index, n - 1);
+                self.server_id_list.swap(index, n - 1);
                 self.low_priority_sender_list.swap(index, n - 1);
                 self.high_priority_sender_list.swap(index, n - 1);
                 self.thread_list.swap(index, n - 1);
                 *self
                     .map_id_index
-                    .get_mut(&self.server_id_list.lock()[index])
+                    .get_mut(&self.server_id_list[index])
                     .unwrap() = index;
             }
 
             // remove the last server
-            self.server_id_list.lock().pop();
+            self.server_id_list.pop();
             self.low_priority_sender_list.pop();
             self.high_priority_sender_list.pop();
             self.thread_list.pop();
@@ -113,24 +112,24 @@ impl Coordinator {
     }
 
     /// Scale to the given number of servers
-    pub fn scale_to(&mut self, num_servers: u32) {
+    pub fn scale_to(&mut self, num_servers: u32, coordinator: Arc<Mutex<Coordinator>>) {
         // remove terminated servers
         self.update_servers();
 
-        let mut n_guard = self.no_active_servers.lock();
-
         // We need to activate servers
-        if *n_guard < num_servers {
+        if self.no_active_servers < num_servers {
             // We activate existing servers
-            while *n_guard < num_servers && *n_guard < self.server_id_list.lock().len() as u32 {
+            while self.no_active_servers < num_servers
+                && self.no_active_servers < self.server_id_list.len() as u32
+            {
                 // Get the channel for the server activation and activate the server
-                let _ = self.high_priority_sender_list[*n_guard as usize]
+                let _ = self.high_priority_sender_list[self.no_active_servers as usize]
                     .send(HighPriorityServerRequest::DeActivate { activate: true });
-                *n_guard += 1;
+                self.no_active_servers += 1;
             }
 
             // We need to add more servers
-            while *n_guard < num_servers {
+            while self.no_active_servers < num_servers {
                 // Create channels for the new server
                 let (low_priority_sender, low_priority_receiver) = unbounded();
                 let (high_priority_sender, high_priority_receiver) = unbounded();
@@ -143,8 +142,7 @@ impl Coordinator {
                     high_priority_receiver,
                     self.terminated_sender.clone(),
                     self.estimator_sender.clone(),
-                    self.no_active_servers.clone(),
-                    self.server_id_list.clone(),
+                    coordinator.clone(),
                 );
                 let server_id = server.id;
 
@@ -152,22 +150,23 @@ impl Coordinator {
                 self.thread_list.push(thread::spawn(move || server.run()));
 
                 // Add everything to the lists
-                self.server_id_list.lock().push(server_id);
+                self.server_id_list.push(server_id);
                 self.low_priority_sender_list.push(low_priority_sender);
                 self.high_priority_sender_list.push(high_priority_sender);
-                self.map_id_index.insert(server_id, *n_guard as usize);
-                *n_guard += 1;
+                self.map_id_index
+                    .insert(server_id, self.no_active_servers as usize);
+                self.no_active_servers += 1;
             }
         }
 
         // We need to deactivate servers
-        if *n_guard > num_servers {
-            while *n_guard > num_servers {
+        if self.no_active_servers > num_servers {
+            while self.no_active_servers > num_servers {
                 // Get the channel for the server deactivation and deactivate the server
-                let _ = self.high_priority_sender_list[(*n_guard - 1) as usize]
+                let _ = self.high_priority_sender_list[(self.no_active_servers - 1) as usize]
                     .send(HighPriorityServerRequest::DeActivate { activate: false });
 
-                *n_guard -= 1;
+                self.no_active_servers -= 1;
             }
         }
     }
@@ -177,7 +176,7 @@ impl Coordinator {
     pub fn get_estimator(&mut self) -> (Vec<Uuid>, Vec<Sender<HighPriorityServerRequest>>) {
         self.update_servers();
         return (
-            self.server_id_list.lock().clone(),
+            self.server_id_list.clone(),
             self.high_priority_sender_list.clone(),
         );
     }
