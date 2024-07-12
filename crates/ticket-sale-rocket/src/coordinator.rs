@@ -9,6 +9,8 @@ use rand::Rng;
 use ticket_sale_core::Request;
 use uuid::Uuid;
 
+use crate::serverrequest::ServerRequest;
+
 use super::database::Database;
 use super::server::Server;
 /// Coordinator orchestrating all the components of the system
@@ -22,9 +24,7 @@ pub struct Coordinator {
     database: Arc<Mutex<Database>>,
     server_id_list: Vec<Uuid>,
     server_sender_req_list: Vec<Sender<Request>>,
-    server_sender_est_list: Vec<Sender<u32>>,
-    server_sender_de_activation_list: Vec<Sender<bool>>,
-    server_sender_shutdown_list: Vec<Sender<bool>>,
+    senders_high_priority: Vec<Sender<ServerRequest>>,
     server_status_receiver_list: Vec<Receiver<u32>>,
     server_thread_list: Vec<JoinHandle<()>>,
     server_map_index: HashMap<Uuid, usize>,
@@ -45,9 +45,7 @@ impl Coordinator {
             database,
             server_id_list: Vec::new(),
             server_sender_req_list: Vec::new(),
-            server_sender_est_list: Vec::new(),
-            server_sender_de_activation_list: Vec::new(),
-            server_sender_shutdown_list: Vec::new(),
+            senders_high_priority: Vec::new(),
             server_status_receiver_list: Vec::new(),
             server_thread_list: Vec::new(),
             server_map_index: HashMap::new(),
@@ -93,8 +91,8 @@ impl Coordinator {
                 && self.no_active_servers < self.server_id_list.len() as u32
             {
                 // Get the channel for the server activation and activate the server
-                let _ = self.server_sender_de_activation_list[self.no_active_servers as usize]
-                    .send(true);
+                let _ = self.senders_high_priority[self.no_active_servers as usize]
+                    .send(ServerRequest::DeActivate{activate: true});
                 /*self.server_thread_list[self.no_active_servers as usize]
                 .thread()
                 .unpark();*/
@@ -105,9 +103,7 @@ impl Coordinator {
             while self.no_active_servers < num_servers {
                 // Create channels for the new server
                 let (server_req_send, server_req_rec) = channel();
-                let (server_est_send, server_est_rec) = channel();
-                let (server_act_send, server_act_rec) = channel();
-                let (server_shut_send, server_shut_rec) = channel();
+                let (highprio_send, highprio_rec) = channel();
                 let (server_status_send, server_status_rec) = channel();
 
                 // Create the server
@@ -115,9 +111,7 @@ impl Coordinator {
                     self.database.clone(),
                     self.reservation_timeout,
                     server_req_rec,
-                    server_est_rec,
-                    server_act_rec,
-                    server_shut_rec,
+                    highprio_rec,
                     server_status_send,
                     self.estimator_sender.clone(),
                 );
@@ -130,9 +124,7 @@ impl Coordinator {
                 // Add everything to the lists
                 self.server_id_list.push(server_id);
                 self.server_sender_req_list.push(server_req_send);
-                self.server_sender_est_list.push(server_est_send);
-                self.server_sender_de_activation_list.push(server_act_send);
-                self.server_sender_shutdown_list.push(server_shut_send);
+                self.senders_high_priority.push(highprio_send);
                 self.server_status_receiver_list.push(server_status_rec);
                 self.server_map_index
                     .insert(server_id, self.no_active_servers as usize);
@@ -145,9 +137,9 @@ impl Coordinator {
         if self.no_active_servers > num_servers {
             while self.no_active_servers > num_servers {
                 // Get the channel for the server deactivation and deactivate the server
-                let _ = self.server_sender_de_activation_list
+                let _ = self.senders_high_priority
                     [(self.no_active_servers - 1) as usize]
-                    .send(false);
+                    .send(ServerRequest::DeActivate { activate: false });
 
                 self.no_active_servers -= 1;
             }
@@ -162,13 +154,13 @@ impl Coordinator {
 
     /// Get estimator ids and sender channels for servers that aren't completely
     /// terminated
-    pub fn get_estimator(&mut self) -> Vec<(Uuid, Sender<u32>)> {
+    pub fn get_estimator(&mut self) -> Vec<(Uuid, Sender<ServerRequest>)> {
         let mut server_sender = Vec::new();
         for i in 0..self.server_id_list.len() {
             if self.get_status(self.server_id_list[i]) != 2 {
                 server_sender.push((
                     self.server_id_list[i],
-                    self.server_sender_est_list[i].clone(),
+                    self.senders_high_priority[i].clone(),
                 ));
             }
         }
@@ -183,8 +175,8 @@ impl Coordinator {
 
     /// Shut down all servers
     pub fn shutdown(&mut self) {
-        for sender in self.server_sender_shutdown_list.iter() {
-            let _ = sender.send(true);
+        for sender in self.senders_high_priority.iter() {
+            let _ = sender.send(ServerRequest::Shutdown);
         }
         /*for thread in self.server_thread_list.iter() {
             thread.thread().unpark();

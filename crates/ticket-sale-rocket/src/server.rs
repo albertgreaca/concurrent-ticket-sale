@@ -11,6 +11,7 @@ use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
 use super::database::Database;
+use super::serverrequest::ServerRequest;
 
 /// A server in the ticket sales system
 pub struct Server {
@@ -23,10 +24,8 @@ pub struct Server {
     tickets: Vec<u32>,
     reserved: HashMap<Uuid, (u32, Instant)>,
     timeout: u32,
-    balancer_receiver: Receiver<Request>,
-    estimator_receiver: Receiver<u32>,
-    de_activate_receiver: Receiver<bool>,
-    shutdown_receiver: Receiver<bool>,
+    low_priority: Receiver<Request>,
+    high_priority: Receiver<ServerRequest>,
     status_sender: Sender<u32>,
     estimator_sender: Sender<u32>,
 }
@@ -36,10 +35,8 @@ impl Server {
     pub fn new(
         database: Arc<Mutex<Database>>,
         timeout: u32,
-        balancer_receiver: Receiver<Request>,
-        estimator_receiver: Receiver<u32>,
-        de_activate_receiver: Receiver<bool>,
-        shutdown_receiver: Receiver<bool>,
+        low_priority: Receiver<Request>,
+        high_priority: Receiver<ServerRequest>,
         status_sender: Sender<u32>,
         estimator_sender: Sender<u32>,
     ) -> Server {
@@ -54,23 +51,33 @@ impl Server {
             tickets,
             reserved: HashMap::new(),
             timeout,
-            balancer_receiver,
-            estimator_receiver,
-            de_activate_receiver,
-            shutdown_receiver,
+            low_priority,
+            high_priority,
             status_sender,
             estimator_sender,
         }
     }
 
     pub fn cycle(&mut self) {
-        match self.estimator_receiver.try_recv() {
+        match self.high_priority.try_recv() {
             Ok(value) => {
-                self.send_tickets(value);
+                match value {
+                    ServerRequest::DeActivate { activate } => {
+                        if activate {
+                            self.activate()
+                        } else {
+                            self.deactivate()
+                        }
+                    }
+                    ServerRequest::Shutdown => self.status = 2,
+                    ServerRequest::Estimate { tickets } => {
+                        self.send_tickets(tickets);
+                    }
+                }
             }
             Err(_) => {
-                if let Ok(rq) = self.balancer_receiver.try_recv() {
-                    self.handle_request(rq);
+                if let Ok(value) = self.low_priority.try_recv() {
+                    self.handle_request(value);
                 }
             }
         }
@@ -219,25 +226,8 @@ impl Server {
     pub fn run(&mut self) {
         loop {
             self.cycle();
-            if self.shutdown_receiver.try_recv().is_ok() {
-                break;
-            }
-            while let Ok(value) = self.de_activate_receiver.try_recv() {
-                if value {
-                    self.activate()
-                } else {
-                    self.deactivate()
-                }
-            }
             if self.status == 2 {
-                //thread::park();
-                while let Ok(value) = self.de_activate_receiver.try_recv() {
-                    if value {
-                        self.activate()
-                    } else {
-                        self.deactivate()
-                    }
-                }
+                break;
             }
         }
     }

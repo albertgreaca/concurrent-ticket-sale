@@ -23,6 +23,7 @@ mod coordinator;
 mod database;
 mod estimator;
 mod server;
+mod serverrequest;
 
 pub use balancer::Balancer;
 use coordinator::Coordinator;

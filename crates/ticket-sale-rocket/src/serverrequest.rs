@@ -1,5 +1,7 @@
-enum ServerRequest {
-    De_Activate,
+#[derive(Clone)]
+
+pub enum ServerRequest {
+    DeActivate { activate: bool },
     Shutdown,
-    Estimate { tickets: u32 }
+    Estimate { tickets: u32 },
 }
