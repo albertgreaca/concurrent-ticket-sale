@@ -1,10 +1,10 @@
 //! Implementation of the server
 #![allow(clippy::too_many_arguments)]
-use std::collections::HashMap;
+use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::Instant;
+use std::{collections::HashMap, sync::mpsc::Receiver};
 
-use crossbeam::channel::{Receiver, Sender};
 use parking_lot::Mutex;
 use rand::Rng;
 use ticket_sale_core::{Request, RequestKind};
@@ -24,9 +24,9 @@ pub struct Server {
     tickets: Vec<u32>,
     reserved: HashMap<Uuid, (u32, Instant)>,
     timeout: u32,
-    low_priority: Option<Receiver<Request>>,
-    high_priority: Option<Receiver<HighPriorityServerRequest>>,
-    terminated_sender: Sender<Uuid>,
+    low_priority: Receiver<Request>,
+    high_priority: Receiver<HighPriorityServerRequest>,
+    status_sender: Sender<(Uuid, u32)>,
     estimator_sender: Sender<u32>,
     no_active_servers: Arc<Mutex<u32>>,
     server_id_list: Arc<Mutex<Vec<Uuid>>>,
@@ -39,7 +39,7 @@ impl Server {
         timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
-        terminated_sender: Sender<Uuid>,
+        status_sender: Sender<(Uuid, u32)>,
         estimator_sender: Sender<u32>,
         no_active_servers: Arc<Mutex<u32>>,
         server_id_list: Arc<Mutex<Vec<Uuid>>>,
@@ -55,30 +55,12 @@ impl Server {
             tickets,
             reserved: HashMap::new(),
             timeout,
-            low_priority: Some(low_priority),
-            high_priority: Some(high_priority),
-            terminated_sender,
+            low_priority,
+            high_priority,
+            status_sender,
             estimator_sender,
             server_id_list,
             no_active_servers,
-        }
-    }
-
-    pub fn get_low_priority_receiver(&mut self) -> &Receiver<Request> {
-        match &self.low_priority {
-            Some(value) => value,
-            None => {
-                panic!("fucking hell");
-            }
-        }
-    }
-
-    pub fn get_high_priority_receiver(&mut self) -> &Receiver<HighPriorityServerRequest> {
-        match &self.high_priority {
-            Some(value) => value,
-            None => {
-                panic!("fucking hell");
-            }
         }
     }
 
@@ -86,8 +68,7 @@ impl Server {
         loop {
             self.cycle();
             if self.status == 2 {
-                let high_priority_channel = self.get_high_priority_receiver();
-                if let Ok(value) = high_priority_channel.try_recv() {
+                if let Ok(value) = self.high_priority.try_recv() {
                     match value {
                         HighPriorityServerRequest::DeActivate { activate } => {
                             if activate {
@@ -103,20 +84,14 @@ impl Server {
                     }
                 }
                 if self.status == 2 {
-                    let high_priority_channel = self.high_priority.take().unwrap();
-                    drop(high_priority_channel);
-
-                    let low_priority_channel = self.low_priority.take().unwrap();
-                    while let Ok(mut rq) = low_priority_channel.try_recv() {
+                    while let Ok(mut rq) = self.low_priority.try_recv() {
                         let mut rng = rand::thread_rng();
                         let x = *self.no_active_servers.lock();
                         let new_serv = self.server_id_list.lock()[rng.gen_range(0..x) as usize];
                         rq.set_server_id(new_serv);
                         rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                     }
-                    drop(low_priority_channel);
-
-                    let _ = self.terminated_sender.send(self.id);
+                    let _ = self.status_sender.send((self.id, 2));
                     break;
                 }
             }
@@ -127,8 +102,7 @@ impl Server {
     }
 
     pub fn cycle(&mut self) {
-        let high_priority_channel = self.get_high_priority_receiver();
-        match high_priority_channel.try_recv() {
+        match self.high_priority.try_recv() {
             Ok(value) => {
                 match value {
                     HighPriorityServerRequest::DeActivate { activate } => {
@@ -145,8 +119,7 @@ impl Server {
                 }
             }
             Err(_) => {
-                let low_priority_channel = self.get_low_priority_receiver();
-                if let Ok(value) = low_priority_channel.try_recv() {
+                if let Ok(value) = self.low_priority.try_recv() {
                     self.handle_request(value);
                 }
             }

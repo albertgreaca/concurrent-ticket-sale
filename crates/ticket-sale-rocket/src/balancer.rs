@@ -1,5 +1,6 @@
 //! Implementation of the load balancer
 
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 

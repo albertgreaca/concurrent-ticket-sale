@@ -1,8 +1,9 @@
 //! Implementation of the estimator
+
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::{collections::HashMap, thread::sleep, time::Duration};
 
-use crossbeam::channel::Receiver;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
@@ -53,18 +54,12 @@ impl Estimator {
                 self.tickets_in_server.insert(*server, 0);
             }
             sum -= self.tickets_in_server[server];
-            let aux = sender.send(HighPriorityServerRequest::Estimate {
+            let _ = sender.send(HighPriorityServerRequest::Estimate {
                 tickets: sum + tickets,
             });
-            match aux {
-                Ok(_) => {
-                    *self.tickets_in_server.get_mut(server).unwrap() =
-                        self.receive_from_server.recv().unwrap();
-                }
-                Err(_) => {
-                    *self.tickets_in_server.get_mut(server).unwrap() = 0;
-                }
-            }
+            *self.tickets_in_server.get_mut(server).unwrap() =
+                self.receive_from_server.recv().unwrap();
+
             sum += self.tickets_in_server[server];
             sleep(Duration::from_secs(
                 (self.roundtrip_secs / servers.len() as u32) as u64,

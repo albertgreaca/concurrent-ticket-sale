@@ -1,9 +1,9 @@
 //! Implementation of the coordinator
 use std::collections::HashMap;
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
 use parking_lot::Mutex;
 use rand::Rng;
 use ticket_sale_core::Request;
@@ -29,8 +29,8 @@ pub struct Coordinator {
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,
 
-    terminated_sender: Sender<Uuid>,
-    terminated_receiver: Receiver<Uuid>,
+    status_sender: Sender<(Uuid, u32)>,
+    status_receiver: Receiver<(Uuid, u32)>,
 
     estimator_sender: Sender<u32>,
 }
@@ -42,7 +42,7 @@ impl Coordinator {
         database: Arc<Mutex<Database>>,
         estimator_sender: Sender<u32>,
     ) -> Self {
-        let (terminated_sender, terminated_receiver) = unbounded();
+        let (status_sender, status_receiver) = channel();
         Self {
             reservation_timeout,
             database,
@@ -52,8 +52,8 @@ impl Coordinator {
             low_priority_sender_list: Vec::new(),
             high_priority_sender_list: Vec::new(),
             thread_list: Vec::new(),
-            terminated_sender,
-            terminated_receiver,
+            status_sender,
+            status_receiver,
             estimator_sender,
         }
     }
@@ -85,33 +85,42 @@ impl Coordinator {
     }
 
     pub fn update_servers(&mut self) {
-        while let Ok(uuid) = self.terminated_receiver.try_recv() {
-            let index = self.map_id_index[&uuid];
+        loop {
+            match self.status_receiver.try_recv() {
+                Ok((uuid, status)) => {
+                    if status == 2 {
+                        let index = self.map_id_index[&uuid];
 
-            let mut server_id_list_guard = self.server_id_list.lock();
-            let n = server_id_list_guard.len();
-            server_id_list_guard.swap(index, n - 1);
-            server_id_list_guard.pop();
+                        let mut server_id_list_guard = self.server_id_list.lock();
+                        let n = server_id_list_guard.len();
+                        server_id_list_guard.swap(index, n - 1);
+                        server_id_list_guard.pop();
 
-            if index != n - 1 {
-                *self
-                    .map_id_index
-                    .get_mut(&server_id_list_guard[index])
-                    .unwrap() = index;
+                        if index != n - 1 {
+                            *self
+                                .map_id_index
+                                .get_mut(&server_id_list_guard[index])
+                                .unwrap() = index;
+                        }
+                        self.map_id_index.remove(&uuid);
+
+                        let n = self.low_priority_sender_list.len();
+                        self.low_priority_sender_list.swap(index, n - 1);
+                        self.low_priority_sender_list.pop();
+
+                        let n = self.high_priority_sender_list.len();
+                        self.high_priority_sender_list.swap(index, n - 1);
+                        self.high_priority_sender_list.pop();
+
+                        let n = self.thread_list.len();
+                        self.thread_list.swap(index, n - 1);
+                        self.thread_list.pop();
+                    }
+                }
+                Err(_) => {
+                    break;
+                }
             }
-            self.map_id_index.remove(&uuid);
-
-            let n = self.low_priority_sender_list.len();
-            self.low_priority_sender_list.swap(index, n - 1);
-            self.low_priority_sender_list.pop();
-
-            let n = self.high_priority_sender_list.len();
-            self.high_priority_sender_list.swap(index, n - 1);
-            self.high_priority_sender_list.pop();
-
-            let n = self.thread_list.len();
-            self.thread_list.swap(index, n - 1);
-            self.thread_list.pop();
         }
     }
 
@@ -133,8 +142,8 @@ impl Coordinator {
             // We need to add more servers
             while *n_guard < num_servers {
                 // Create channels for the new server
-                let (low_priority_sender, low_priority_receiver) = unbounded();
-                let (high_priority_sender, high_priority_receiver) = unbounded();
+                let (low_priority_sender, low_priority_receiver) = channel();
+                let (high_priority_sender, high_priority_receiver) = channel();
 
                 // Create the server
                 let mut server = Server::new(
@@ -142,7 +151,7 @@ impl Coordinator {
                     self.reservation_timeout,
                     low_priority_receiver,
                     high_priority_receiver,
-                    self.terminated_sender.clone(),
+                    self.status_sender.clone(),
                     self.estimator_sender.clone(),
                     self.no_active_servers.clone(),
                     self.server_id_list.clone(),

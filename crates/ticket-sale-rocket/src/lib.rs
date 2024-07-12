@@ -9,13 +9,15 @@
 //! communication.
 
 #![allow(rustdoc::private_intra_doc_links)]
+
+use std::sync::mpsc::channel;
 use std::sync::Arc;
 use std::thread;
 
-use crossbeam::channel::unbounded;
 use estimator::Estimator;
 use parking_lot::Mutex;
 use ticket_sale_core::Config;
+use crossbeam::channel::unbounded;
 
 mod balancer;
 mod coordinator;
@@ -38,7 +40,8 @@ pub fn launch(config: &Config) -> Balancer {
     if config.bonus {
         todo!("Bonus not implemented!")
     }
-    let (est_send, est_rec) = unbounded();
+    let (random_send , random_rec) = unbounded::<u32>();
+    let (est_send, est_rec) = channel();
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
     let coordinator = Arc::new(Mutex::new(Coordinator::new(
         config.timeout,
