@@ -84,40 +84,39 @@ impl Coordinator {
         }
     }
 
+    ///remove terminated servers from lists
     pub fn update_servers(&mut self) {
         while let Ok(uuid) = self.terminated_receiver.try_recv() {
+            // find the position of a terminating server
             let index = self.map_id_index[&uuid];
+            let n = self.server_id_list.lock().len();
 
-            let mut server_id_list_guard = self.server_id_list.lock();
-            let n = server_id_list_guard.len();
-            server_id_list_guard.swap(index, n - 1);
-            server_id_list_guard.pop();
-
+            // if its not the last one, swap it with the last one
             if index != n - 1 {
+                self.server_id_list.lock().swap(index, n - 1);
+                self.low_priority_sender_list.swap(index, n - 1);
+                self.high_priority_sender_list.swap(index, n - 1);
+                self.thread_list.swap(index, n - 1);
                 *self
                     .map_id_index
-                    .get_mut(&server_id_list_guard[index])
+                    .get_mut(&self.server_id_list.lock()[index])
                     .unwrap() = index;
             }
-            self.map_id_index.remove(&uuid);
 
-            let n = self.low_priority_sender_list.len();
-            self.low_priority_sender_list.swap(index, n - 1);
+            // remove the last server
+            self.server_id_list.lock().pop();
             self.low_priority_sender_list.pop();
-
-            let n = self.high_priority_sender_list.len();
-            self.high_priority_sender_list.swap(index, n - 1);
             self.high_priority_sender_list.pop();
-
-            let n = self.thread_list.len();
-            self.thread_list.swap(index, n - 1);
             self.thread_list.pop();
+            self.map_id_index.remove(&uuid);
         }
     }
 
     /// Scale to the given number of servers
     pub fn scale_to(&mut self, num_servers: u32) {
+        // remove terminated servers
         self.update_servers();
+
         let mut n_guard = self.no_active_servers.lock();
 
         // We need to activate servers
