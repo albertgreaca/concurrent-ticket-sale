@@ -11,7 +11,7 @@ use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
 use super::database::Database;
-use super::serverrequest::ServerRequest;
+use super::serverrequest::HighPriorityServerRequest;
 
 /// A server in the ticket sales system
 pub struct Server {
@@ -25,11 +25,11 @@ pub struct Server {
     reserved: HashMap<Uuid, (u32, Instant)>,
     timeout: u32,
     low_priority: Receiver<Request>,
-    high_priority: Receiver<ServerRequest>,
-    status_sender: Sender<u32>,
+    high_priority: Receiver<HighPriorityServerRequest>,
+    status_sender: Sender<(Uuid, u32)>,
     estimator_sender: Sender<u32>,
-    server_id_list: Arc<Mutex<Vec<Uuid>>>,
     no_active_servers: Arc<Mutex<u32>>,
+    server_id_list: Arc<Mutex<Vec<Uuid>>>,
 }
 
 impl Server {
@@ -38,11 +38,11 @@ impl Server {
         database: Arc<Mutex<Database>>,
         timeout: u32,
         low_priority: Receiver<Request>,
-        high_priority: Receiver<ServerRequest>,
-        status_sender: Sender<u32>,
+        high_priority: Receiver<HighPriorityServerRequest>,
+        status_sender: Sender<(Uuid, u32)>,
         estimator_sender: Sender<u32>,
-        server_id_list: Arc<Mutex<Vec<Uuid>>>,
         no_active_servers: Arc<Mutex<u32>>,
+        server_id_list: Arc<Mutex<Vec<Uuid>>>,
     ) -> Server {
         let id = Uuid::new_v4();
         let num_tickets = (database.lock().get_num_available() as f64).sqrt() as u32;
@@ -67,8 +67,26 @@ impl Server {
     pub fn run(&mut self) {
         loop {
             self.cycle();
-            if self.status == 3 {
-                break;
+            if self.status == 2 {
+                if let Ok(value) = self.high_priority.try_recv() {
+                    match value {
+                        HighPriorityServerRequest::DeActivate { activate } => {
+                            if activate {
+                                self.activate()
+                            } else {
+                                self.deactivate()
+                            }
+                        }
+                        HighPriorityServerRequest::Shutdown => self.status = 2,
+                        HighPriorityServerRequest::Estimate { tickets } => {
+                            self.send_tickets(tickets);
+                        }
+                    }
+                }
+                if self.status == 2 {
+                    let _ = self.status_sender.send((self.id, 2));
+                    break;
+                }
             }
         }
     }
@@ -77,15 +95,15 @@ impl Server {
         match self.high_priority.try_recv() {
             Ok(value) => {
                 match value {
-                    ServerRequest::DeActivate { activate } => {
+                    HighPriorityServerRequest::DeActivate { activate } => {
                         if activate {
                             self.activate()
                         } else {
                             self.deactivate()
                         }
                     }
-                    ServerRequest::Shutdown => self.status = 3,
-                    ServerRequest::Estimate { tickets } => {
+                    HighPriorityServerRequest::Shutdown => self.status = 2,
+                    HighPriorityServerRequest::Estimate { tickets } => {
                         self.send_tickets(tickets);
                     }
                 }
@@ -99,19 +117,16 @@ impl Server {
     }
 
     pub fn activate(&mut self) {
-        let _ = self.status_sender.send(0);
         self.status = 0;
     }
 
     pub fn deactivate(&mut self) {
-        let _ = self.status_sender.send(1);
         self.status = 1;
         if !self.tickets.is_empty() {
             self.database.lock().deallocate(self.tickets.as_slice());
         }
         self.tickets.clear();
         if self.reserved.is_empty() {
-            let _ = self.status_sender.send(2);
             self.status = 2;
         }
     }
@@ -141,7 +156,6 @@ impl Server {
                 self.database.lock().deallocate(self.tickets.as_slice());
             }
             self.tickets.clear();
-            let _ = self.status_sender.send(2);
             self.status = 2;
         }
         self.estimate = tickets;
@@ -170,7 +184,6 @@ impl Server {
                 self.database.lock().deallocate(self.tickets.as_slice());
             }
             self.tickets.clear();
-            let _ = self.status_sender.send(2);
             self.status = 2;
         }
         match rq.kind() {
@@ -183,10 +196,6 @@ impl Server {
                     rq.respond_with_err("one reservation already present");
                     return;
                 }
-                /*if self.get_available_tickets() == 0 {
-                    rq.respond_with_sold_out();
-                    return;
-                }*/
                 if self.status == 1 {
                     let mut rng = rand::thread_rng();
                     let x = *self.no_active_servers.lock();
@@ -223,7 +232,6 @@ impl Server {
                                     self.database.lock().deallocate(self.tickets.as_slice());
                                 }
                                 self.tickets.clear();
-                                let _ = self.status_sender.send(2);
                                 self.status = 2;
                             }
                             rq.respond_with_int(ticket);
@@ -255,7 +263,6 @@ impl Server {
                                     self.database.lock().deallocate(self.tickets.as_slice());
                                 }
                                 self.tickets.clear();
-                                let _ = self.status_sender.send(2);
                                 self.status = 2;
                             }
                             rq.respond_with_int(ticket);

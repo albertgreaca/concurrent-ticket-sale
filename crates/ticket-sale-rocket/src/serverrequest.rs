@@ -1,6 +1,4 @@
-#[derive(Clone)]
-
-pub enum ServerRequest {
+pub enum HighPriorityServerRequest {
     DeActivate { activate: bool },
     Shutdown,
     Estimate { tickets: u32 },

@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use super::coordinator::Coordinator;
 use super::database::Database;
-use super::serverrequest::ServerRequest;
+use super::serverrequest::HighPriorityServerRequest;
 
 /// Estimator that estimates the number of tickets available overall
 pub struct Estimator {
@@ -44,31 +44,25 @@ impl Estimator {
 
     pub fn run(&mut self, mut sum: u32) -> u32 {
         let mut guard2 = self.coordinator.lock();
-        let servers_senders = guard2.get_estimator().clone();
+        let (servers, senders) = guard2.get_estimator();
         drop(guard2);
         let guard = self.database.lock();
         let tickets = guard.get_num_available();
         drop(guard);
-        for (server, sender) in &servers_senders {
+        for (server, sender) in servers.iter().zip(senders.iter()) {
             if !self.tickets_in_server.contains_key(server) {
                 self.tickets_in_server.insert(*server, 0);
             }
             sum -= self.tickets_in_server[server];
-            let _ = sender.send(ServerRequest::Estimate {
+            let _ = sender.send(HighPriorityServerRequest::Estimate {
                 tickets: sum + tickets,
             });
-            let mut guard3 = self.coordinator.lock();
-            if guard3.get_status(*server) != 2 {
-                *self.tickets_in_server.get_mut(server).unwrap() =
-                    self.receive_from_server.recv().unwrap();
-            } else {
-                *self.tickets_in_server.get_mut(server).unwrap() = 0;
-            }
-            drop(guard3);
+            *self.tickets_in_server.get_mut(server).unwrap() =
+                self.receive_from_server.recv().unwrap();
 
             sum += self.tickets_in_server[server];
             sleep(Duration::from_secs(
-                (self.roundtrip_secs / servers_senders.len() as u32) as u64,
+                (self.roundtrip_secs / servers.len() as u32) as u64,
             ));
         }
         sum
