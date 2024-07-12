@@ -1,9 +1,11 @@
 //! Implementation of the load balancer
 
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 use parking_lot::Mutex;
+use rand::Rng;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 
 use super::coordinator::Coordinator;
@@ -81,9 +83,24 @@ impl RequestHandler for Balancer {
                         x
                     }
                 };
-                // forward the request to the server
-                let server_sender = self.coordinator.lock().get_low_priority_sender(server_no);
-                let _ = server_sender.send(rq);
+                self.coordinator.lock().update_servers();
+                if !self
+                    .coordinator
+                    .lock()
+                    .map_id_index
+                    .contains_key(&server_no)
+                {
+                    let mut rng = rand::thread_rng();
+                    let x = *self.coordinator.lock().no_active_servers.lock();
+                    let new_serv =
+                        self.coordinator.lock().server_id_list.lock()[rng.gen_range(0..x) as usize];
+                    rq.set_server_id(new_serv);
+                    rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
+                } else {
+                    // forward the request to the server
+                    let server_sender = self.coordinator.lock().get_low_priority_sender(server_no);
+                    let _ = server_sender.send(rq);
+                }
             }
         }
     }

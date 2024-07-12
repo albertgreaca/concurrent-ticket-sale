@@ -23,8 +23,8 @@ pub struct Coordinator {
     database: Arc<Mutex<Database>>,
 
     pub no_active_servers: Arc<Mutex<u32>>,
-    map_id_index: HashMap<Uuid, usize>,
-    server_id_list: Arc<Mutex<Vec<Uuid>>>,
+    pub map_id_index: HashMap<Uuid, usize>,
+    pub server_id_list: Arc<Mutex<Vec<Uuid>>>,
     low_priority_sender_list: Vec<Sender<Request>>,
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,

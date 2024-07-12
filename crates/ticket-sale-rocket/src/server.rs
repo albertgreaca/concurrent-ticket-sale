@@ -84,6 +84,13 @@ impl Server {
                     }
                 }
                 if self.status == 2 {
+                    while let Ok(mut rq) = self.low_priority.try_recv() {
+                        let mut rng = rand::thread_rng();
+                        let x = *self.no_active_servers.lock();
+                        let new_serv = self.server_id_list.lock()[rng.gen_range(0..x) as usize];
+                        rq.set_server_id(new_serv);
+                        rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
+                    }
                     let _ = self.status_sender.send((self.id, 2));
                     break;
                 }
