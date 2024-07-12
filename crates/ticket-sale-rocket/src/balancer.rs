@@ -71,34 +71,30 @@ impl RequestHandler for Balancer {
             }
             _ => {
                 // get server Uuid from request or assign new server
+                let mut coordinator_guard = self.coordinator.lock();
                 let server_no = match rq.server_id() {
                     Some(n) => n,
                     None => {
-                        if *self.coordinator.lock().no_active_servers.lock() == 0 {
+                        if *coordinator_guard.no_active_servers.lock() == 0 {
                             rq.respond_with_err("no server available");
                             return;
                         }
-                        let x = self.coordinator.lock().get_random_server();
+                        let x = coordinator_guard.get_random_server();
                         rq.set_server_id(x);
                         x
                     }
                 };
-                self.coordinator.lock().update_servers();
-                if !self
-                    .coordinator
-                    .lock()
-                    .map_id_index
-                    .contains_key(&server_no)
-                {
+                coordinator_guard.update_servers();
+                if !coordinator_guard.map_id_index.contains_key(&server_no) {
                     let mut rng = rand::thread_rng();
-                    let x = *self.coordinator.lock().no_active_servers.lock();
+                    let x = *coordinator_guard.no_active_servers.lock();
                     let new_serv =
-                        self.coordinator.lock().server_id_list.lock()[rng.gen_range(0..x) as usize];
+                        coordinator_guard.server_id_list.lock()[rng.gen_range(0..x) as usize];
                     rq.set_server_id(new_serv);
                     rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                 } else {
                     // forward the request to the server
-                    let server_sender = self.coordinator.lock().get_low_priority_sender(server_no);
+                    let server_sender = coordinator_guard.get_low_priority_sender(server_no);
                     let _ = server_sender.send(rq);
                 }
             }
