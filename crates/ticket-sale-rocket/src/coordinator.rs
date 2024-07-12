@@ -96,10 +96,12 @@ impl Coordinator {
                         server_id_list_guard.swap(index, n - 1);
                         server_id_list_guard.pop();
 
-                        *self
-                            .map_id_index
-                            .get_mut(&server_id_list_guard[index])
-                            .unwrap() = index;
+                        if index != n - 1 {
+                            *self
+                                .map_id_index
+                                .get_mut(&server_id_list_guard[index])
+                                .unwrap() = index;
+                        }
                         self.map_id_index.remove(&uuid);
 
                         let n = self.low_priority_sender_list.len();
