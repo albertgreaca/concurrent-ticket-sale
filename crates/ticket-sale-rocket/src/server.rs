@@ -109,10 +109,8 @@ impl Server {
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
                         let mut rng = rand::thread_rng();
-                        let guard = self.no_active_servers.lock();
-                        let new_serv =
-                            self.server_id_list.lock()[rng.gen_range(0..*guard) as usize];
-                        drop(guard);
+                        let x = *self.no_active_servers.lock();
+                        let new_serv = self.server_id_list.lock()[rng.gen_range(0..x) as usize];
                         rq.set_server_id(new_serv);
                         rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                     }
@@ -237,9 +235,8 @@ impl Server {
                 }
                 if self.status == 1 {
                     let mut rng = rand::thread_rng();
-                    let guard = self.no_active_servers.lock();
-                    let new_serv = self.server_id_list.lock()[rng.gen_range(0..*guard) as usize];
-                    drop(guard);
+                    let x = *self.no_active_servers.lock();
+                    let new_serv = self.server_id_list.lock()[rng.gen_range(0..x) as usize];
                     rq.set_server_id(new_serv);
                     rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                     return;
