@@ -58,6 +58,15 @@ impl Server {
         }
     }
 
+    pub fn run(&mut self) {
+        loop {
+            self.cycle();
+            if self.status == 3 {
+                break;
+            }
+        }
+    }
+
     pub fn cycle(&mut self) {
         match self.high_priority.try_recv() {
             Ok(value) => {
@@ -82,6 +91,57 @@ impl Server {
             }
         }
     }
+
+    pub fn activate(&mut self) {
+        let _ = self.status_sender.send(0);
+        self.status = 0;
+    }
+
+    pub fn deactivate(&mut self) {
+        let _ = self.status_sender.send(1);
+        self.status = 1;
+        if !self.tickets.is_empty() {
+            self.database.lock().deallocate(self.tickets.as_slice());
+        }
+        self.tickets.clear();
+        if self.reserved.is_empty() {
+            let _ = self.status_sender.send(2);
+            self.status = 2;
+        }
+    }
+
+    pub fn get_available_tickets(&self) -> u32 {
+        self.tickets.len() as u32 + self.estimate
+    }
+
+    pub fn send_tickets(&mut self, tickets: u32) {
+        let mut database_guard = self.database.lock();
+        self.reserved.retain(|_, (ticket, time)| {
+            if time.elapsed().as_secs() > self.timeout as u64 {
+                if self.status == 0 {
+                    self.tickets.push(*ticket);
+                } else {
+                    let x = *ticket;
+                    database_guard.deallocate(&[x]);
+                }
+                false
+            } else {
+                true
+            }
+        });
+        drop(database_guard);
+        if self.reserved.is_empty() && self.status == 1 {
+            if !self.tickets.is_empty() {
+                self.database.lock().deallocate(self.tickets.as_slice());
+            }
+            self.tickets.clear();
+            let _ = self.status_sender.send(2);
+            self.status = 2;
+        }
+        self.estimate = tickets;
+        let _ = self.estimator_sender.send(self.tickets.len() as u32);
+    }
+
     /// Handle a [`Request`]
     pub fn handle_request(&mut self, mut rq: Request) {
         let mut database_guard = self.database.lock();
@@ -196,57 +256,6 @@ impl Server {
             _ => {
                 rq.respond_with_err("fucking hell");
             }
-        }
-    }
-
-    pub fn send_tickets(&mut self, tickets: u32) {
-        let mut database_guard = self.database.lock();
-        self.reserved.retain(|_, (ticket, time)| {
-            if time.elapsed().as_secs() > self.timeout as u64 {
-                if self.status == 0 {
-                    self.tickets.push(*ticket);
-                } else {
-                    let x = *ticket;
-                    database_guard.deallocate(&[x]);
-                }
-                false
-            } else {
-                true
-            }
-        });
-        drop(database_guard);
-        self.estimate = tickets;
-        let _ = self.estimator_sender.send(self.tickets.len() as u32);
-    }
-
-    pub fn get_available_tickets(&self) -> u32 {
-        self.tickets.len() as u32 + self.estimate
-    }
-
-    pub fn run(&mut self) {
-        loop {
-            self.cycle();
-            if self.status == 3 {
-                break;
-            }
-        }
-    }
-
-    pub fn activate(&mut self) {
-        let _ = self.status_sender.send(0);
-        self.status = 0;
-    }
-
-    pub fn deactivate(&mut self) {
-        let _ = self.status_sender.send(1);
-        self.status = 1;
-        if !self.tickets.is_empty() {
-            self.database.lock().deallocate(self.tickets.as_slice());
-        }
-        self.tickets.clear();
-        if self.reserved.is_empty() {
-            let _ = self.status_sender.send(2);
-            self.status = 2;
         }
     }
 }
