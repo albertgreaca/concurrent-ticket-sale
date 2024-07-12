@@ -7,8 +7,6 @@ use std::{collections::HashMap, thread::sleep, time::Duration};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use crate::server::Server;
-
 use super::coordinator::Coordinator;
 use super::database::Database;
 use super::serverrequest::ServerRequest;
@@ -56,7 +54,9 @@ impl Estimator {
                 self.tickets_in_server.insert(*server, 0);
             }
             sum -= self.tickets_in_server[server];
-            let _ = sender.send(ServerRequest::Estimate { tickets: sum + tickets });
+            let _ = sender.send(ServerRequest::Estimate {
+                tickets: sum + tickets,
+            });
             let mut guard3 = self.coordinator.lock();
             if guard3.get_status(*server) != 2 {
                 *self.tickets_in_server.get_mut(server).unwrap() =

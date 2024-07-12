@@ -41,11 +41,19 @@ impl RequestHandler for Balancer {
     fn handle(&self, mut rq: Request) {
         match rq.kind() {
             RequestKind::GetNumServers => {
+                // get the number of servers with status 0
                 rq.respond_with_int(self.coordinator.lock().get_num_active_servers());
+            }
+            RequestKind::GetServers => {
+                // get the servers with status 0
+                rq.respond_with_server_list(
+                    self.coordinator.lock().get_active_servers().as_slice(),
+                );
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
                     Some(n) => {
+                        // set number of servers with status 0 to n
                         self.coordinator.lock().scale_to(n);
                         rq.respond_with_int(n);
                     }
@@ -54,21 +62,17 @@ impl RequestHandler for Balancer {
                     }
                 };
             }
-            RequestKind::GetServers => {
-                rq.respond_with_server_list(
-                    self.coordinator.lock().get_active_servers().as_slice(),
-                );
-            }
             RequestKind::Debug => {
                 // 📌 Hint: You can use `rq.url()` and `rq.method()` to
                 // implement multiple debugging commands.
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
+                // get server Uuid from request or assign new server
                 let server_no = match rq.server_id() {
                     Some(n) => n,
                     None => {
-                        if self.coordinator.lock().no_active_servers == 0 {
+                        if *self.coordinator.lock().no_active_servers.lock() == 0 {
                             rq.respond_with_err("no server available");
                             return;
                         }
@@ -77,22 +81,9 @@ impl RequestHandler for Balancer {
                         x
                     }
                 };
-                let status = self.coordinator.lock().get_status(server_no);
-                if (*rq.kind() != RequestKind::ReserveTicket && status == 1) || status == 0 {
-                    let server_sender = self
-                        .coordinator
-                        .lock()
-                        .get_balancer_server_sender(server_no);
-                    let _ = server_sender.send(rq);
-                } else {
-                    if self.coordinator.lock().no_active_servers == 0 {
-                        rq.respond_with_err("no server available");
-                        return;
-                    }
-                    let x = self.coordinator.lock().get_random_server();
-                    rq.set_server_id(x);
-                    rq.respond_with_err("server terminating");
-                }
+                // forward the request to the server
+                let server_sender = self.coordinator.lock().get_low_priority_sender(server_no);
+                let _ = server_sender.send(rq);
             }
         }
     }

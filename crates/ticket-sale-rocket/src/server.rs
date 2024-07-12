@@ -2,11 +2,11 @@
 #![allow(clippy::too_many_arguments)]
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
-use std::thread;
 use std::time::Instant;
 use std::{collections::HashMap, sync::mpsc::Receiver};
 
 use parking_lot::Mutex;
+use rand::Rng;
 use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
@@ -28,6 +28,8 @@ pub struct Server {
     high_priority: Receiver<ServerRequest>,
     status_sender: Sender<u32>,
     estimator_sender: Sender<u32>,
+    server_id_list: Arc<Mutex<Vec<Uuid>>>,
+    no_active_servers: Arc<Mutex<u32>>,
 }
 
 impl Server {
@@ -39,6 +41,8 @@ impl Server {
         high_priority: Receiver<ServerRequest>,
         status_sender: Sender<u32>,
         estimator_sender: Sender<u32>,
+        server_id_list: Arc<Mutex<Vec<Uuid>>>,
+        no_active_servers: Arc<Mutex<u32>>,
     ) -> Server {
         let id = Uuid::new_v4();
         let num_tickets = (database.lock().get_num_available() as f64).sqrt() as u32;
@@ -55,6 +59,8 @@ impl Server {
             high_priority,
             status_sender,
             estimator_sender,
+            server_id_list,
+            no_active_servers,
         }
     }
 
@@ -181,6 +187,14 @@ impl Server {
                     rq.respond_with_sold_out();
                     return;
                 }*/
+                if self.status == 1 {
+                    let mut rng = rand::thread_rng();
+                    let x = *self.no_active_servers.lock();
+                    let new_serv = self.server_id_list.lock()[rng.gen_range(0..x) as usize];
+                    rq.set_server_id(new_serv);
+                    rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
+                    return;
+                }
                 if self.tickets.is_empty() {
                     let mut database_guard = self.database.lock();
                     if database_guard.get_num_available() == 0 {
