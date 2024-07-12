@@ -95,6 +95,9 @@ impl Server {
                     break;
                 }
             }
+            if self.status == 3 {
+                break;
+            }
         }
     }
 
@@ -109,7 +112,7 @@ impl Server {
                             self.deactivate()
                         }
                     }
-                    HighPriorityServerRequest::Shutdown => self.status = 2,
+                    HighPriorityServerRequest::Shutdown => self.status = 3,
                     HighPriorityServerRequest::Estimate { tickets } => {
                         self.send_tickets(tickets);
                     }
