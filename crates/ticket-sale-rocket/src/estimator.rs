@@ -44,40 +44,38 @@ impl Estimator {
         }
     }
 
-    pub fn run(&mut self) {
-        let mut sum = 0;
-        while Arc::strong_count(&self.estimator_term) > 1 {
-            let mut guard2 = self.coordinator.lock();
-            let (servers, senders) = guard2.get_estimator();
-            drop(guard2);
-            let guard = self.database.lock();
-            let tickets = guard.get_num_available();
-            drop(guard);
-            for (server, sender) in servers.iter().zip(senders.iter()) {
-                if Arc::strong_count(&self.estimator_term) == 1 {
-                    break;
-                }
-                if !self.tickets_in_server.contains_key(server) {
-                    self.tickets_in_server.insert(*server, 0);
-                }
-                sum -= self.tickets_in_server[server];
-                let aux = sender.send(HighPriorityServerRequest::Estimate {
-                    tickets: sum + tickets,
-                });
-                match aux {
-                    Ok(_) => {
-                        *self.tickets_in_server.get_mut(server).unwrap() =
-                            self.receive_from_server.recv().unwrap();
-                    }
-                    Err(_) => {
-                        *self.tickets_in_server.get_mut(server).unwrap() = 0;
-                    }
-                }
-                sum += self.tickets_in_server[server];
-                sleep(Duration::from_secs(
-                    (self.roundtrip_secs / servers.len() as u32) as u64,
-                ));
+    pub fn run(&mut self, mut sum: u32) -> u32 {
+        let mut guard2 = self.coordinator.lock();
+        let (servers, senders) = guard2.get_estimator();
+        drop(guard2);
+        let guard = self.database.lock();
+        let tickets = guard.get_num_available();
+        drop(guard);
+        for (server, sender) in servers.iter().zip(senders.iter()) {
+            if Arc::strong_count(&self.estimator_term) <= 2 {
+                break;
             }
+            if !self.tickets_in_server.contains_key(server) {
+                self.tickets_in_server.insert(*server, 0);
+            }
+            sum -= self.tickets_in_server[server];
+            let aux = sender.send(HighPriorityServerRequest::Estimate {
+                tickets: sum + tickets,
+            });
+            match aux {
+                Ok(_) => {
+                    *self.tickets_in_server.get_mut(server).unwrap() =
+                        self.receive_from_server.recv().unwrap();
+                }
+                Err(_) => {
+                    *self.tickets_in_server.get_mut(server).unwrap() = 0;
+                }
+            }
+            sum += self.tickets_in_server[server];
+            sleep(Duration::from_secs(
+                (self.roundtrip_secs / servers.len() as u32) as u64,
+            ));
         }
+        sum
     }
 }
