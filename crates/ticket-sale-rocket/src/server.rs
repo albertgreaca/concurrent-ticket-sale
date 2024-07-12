@@ -69,7 +69,7 @@ impl Server {
                             self.deactivate()
                         }
                     }
-                    ServerRequest::Shutdown => self.status = 2,
+                    ServerRequest::Shutdown => self.status = 3,
                     ServerRequest::Estimate { tickets } => {
                         self.send_tickets(tickets);
                     }
@@ -226,7 +226,7 @@ impl Server {
     pub fn run(&mut self) {
         loop {
             self.cycle();
-            if self.status == 2 {
+            if self.status == 3 {
                 break;
             }
         }
