@@ -46,21 +46,18 @@ pub fn launch(config: &Config) -> Balancer {
         est_send,
     )));
     coordinator.lock().scale_to(config.initial_servers);
-    let estimator_term = Arc::new(Mutex::new(0));
-    let estimator_term2 = estimator_term.clone();
-    let estimator_term3 = estimator_term.clone();
     let estimator = Arc::new(Mutex::new(Estimator::new(
         database.clone(),
         coordinator.clone(),
         config.estimator_roundtrip_time,
         est_rec,
-        estimator_term,
     )));
+    let estimator2 = estimator.clone();
     let other_thread = thread::spawn(move || {
         let mut sum = 0;
-        while Arc::strong_count(&estimator_term2) > 2 {
-            sum = estimator.lock().run(sum);
+        while Arc::strong_count(&estimator2) > 1 {
+            sum = estimator2.lock().run(sum);
         }
     });
-    Balancer::new(coordinator.clone(), estimator_term3, other_thread)
+    Balancer::new(coordinator.clone(), estimator, other_thread)
 }

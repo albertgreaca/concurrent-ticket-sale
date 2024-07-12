@@ -1,6 +1,5 @@
 //! Implementation of the load balancer
 
-use std::io::{self, Write};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
@@ -17,7 +16,7 @@ use super::estimator::Estimator;
 /// `ticket_sale_rocket::Balancer`).
 pub struct Balancer {
     coordinator: Arc<Mutex<Coordinator>>,
-    estimator_term: Arc<Mutex<u32>>,
+    estimator: Arc<Mutex<Estimator>>,
     other_thread: JoinHandle<()>,
 }
 
@@ -25,12 +24,12 @@ impl Balancer {
     /// Create a new [`Balancer`]
     pub fn new(
         coordinator: Arc<Mutex<Coordinator>>,
-        estimator_term: Arc<Mutex<u32>>,
+        estimator: Arc<Mutex<Estimator>>,
         other_thread: JoinHandle<()>,
     ) -> Self {
         Self {
             coordinator,
-            estimator_term,
+            estimator,
             other_thread,
         }
     }
@@ -102,7 +101,7 @@ impl RequestHandler for Balancer {
     }
 
     fn shutdown(self) {
-        drop(self.estimator_term);
+        drop(self.estimator);
         self.other_thread.join().unwrap();
         self.coordinator.lock().shutdown();
     }

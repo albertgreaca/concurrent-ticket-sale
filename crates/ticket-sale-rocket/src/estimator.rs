@@ -17,7 +17,6 @@ pub struct Estimator {
     roundtrip_secs: u32,
     tickets_in_server: HashMap<Uuid, u32>,
     receive_from_server: Receiver<u32>,
-    estimator_term: Arc<Mutex<u32>>,
 }
 
 impl Estimator {
@@ -32,7 +31,6 @@ impl Estimator {
         coordinator: Arc<Mutex<Coordinator>>,
         roundtrip_secs: u32,
         receive_from_server: Receiver<u32>,
-        estimator_term: Arc<Mutex<u32>>,
     ) -> Self {
         Self {
             coordinator,
@@ -40,7 +38,6 @@ impl Estimator {
             roundtrip_secs,
             tickets_in_server: HashMap::new(),
             receive_from_server,
-            estimator_term,
         }
     }
 
@@ -52,9 +49,6 @@ impl Estimator {
         let tickets = guard.get_num_available();
         drop(guard);
         for (server, sender) in servers.iter().zip(senders.iter()) {
-            if Arc::strong_count(&self.estimator_term) <= 2 {
-                break;
-            }
             if !self.tickets_in_server.contains_key(server) {
                 self.tickets_in_server.insert(*server, 0);
             }
