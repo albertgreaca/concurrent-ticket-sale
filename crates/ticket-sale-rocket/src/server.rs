@@ -25,7 +25,7 @@ pub struct Server {
     tickets: Vec<u32>,
     reserved: HashMap<Uuid, (u32, Instant)>,
     timeout: u32,
-    low_priority: Option<Receiver<Option<Request>>>,
+    low_priority: Option<Receiver<Request>>,
     high_priority: Option<Receiver<HighPriorityServerRequest>>,
     terminated_sender: Sender<Uuid>,
     estimator_sender: Sender<u32>,
@@ -37,7 +37,7 @@ impl Server {
     pub fn new(
         database: Arc<Mutex<Database>>,
         timeout: u32,
-        low_priority: Receiver<Option<Request>>,
+        low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
         terminated_sender: Sender<Uuid>,
         estimator_sender: Sender<u32>,
@@ -62,7 +62,7 @@ impl Server {
         }
     }
 
-    pub fn get_low_priority_receiver(&self) -> &Receiver<Option<Request>> {
+    pub fn get_low_priority_receiver(&self) -> &Receiver<Request> {
         match &self.low_priority {
             Some(value) => value,
             None => {
@@ -90,18 +90,11 @@ impl Server {
                     drop(high_priority_channel);
 
                     let low_priority_channel = self.low_priority.take().unwrap();
-                    while let Ok(rq) = low_priority_channel.try_recv() {
-                        match rq {
-                            Some(mut rq) => {
-                                let coordinator_guard = self.coordinator.lock();
-                                let x = coordinator_guard.get_random_server();
-                                rq.set_server_id(x);
-                                rq.respond_with_err(
-                                    "No Ticket Reservation allowed anymore on this server",
-                                );
-                            }
-                            None => {}
-                        }
+                    while let Ok(mut rq) = low_priority_channel.try_recv() {
+                        let coordinator_guard = self.coordinator.lock();
+                        let x = coordinator_guard.get_random_server();
+                        rq.set_server_id(x);
+                        rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                     }
                     drop(low_priority_channel);
 
@@ -159,12 +152,7 @@ impl Server {
                 let low_priority_channel = self.get_low_priority_receiver();
                 match low_priority_channel.try_recv() {
                     Ok(value) => {
-                        match value {
-                            Some(rq) => {
-                                self.handle_request(rq);
-                            }
-                            None => {}
-                        }
+                        self.handle_request(value);
                     }
                     Err(_) => {
                         self.wait();
@@ -203,12 +191,7 @@ impl Server {
             recv(low_priority_channel) -> msg => {
                 match msg {
                     Ok(value) => {
-                        match value {
-                            Some(rq) => {
-                                self.handle_request(rq);
-                            }
-                            None => {}
-                        }
+                        self.handle_request(value);
                     }
                     Err(_) => {
                         panic!("what the fuck");

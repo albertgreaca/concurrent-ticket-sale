@@ -1,14 +1,9 @@
 //! Implementation of the load balancer
-#![allow(clippy::map_entry)]
-use std::collections::HashMap;
-use std::io::{self, Write};
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
-use crossbeam::channel::Sender;
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
-use uuid::Uuid;
 
 use super::coordinator::Coordinator;
 /// Implementation of the load balancer
@@ -20,7 +15,6 @@ pub struct Balancer {
     coordinator: Arc<Mutex<Coordinator>>,
     estimator_shutdown: mpsc::Sender<()>,
     other_thread: JoinHandle<()>,
-    server_sender: Mutex<HashMap<Uuid, Sender<Option<Request>>>>,
 }
 
 impl Balancer {
@@ -34,7 +28,6 @@ impl Balancer {
             coordinator,
             estimator_shutdown,
             other_thread,
-            server_sender: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -73,61 +66,33 @@ impl RequestHandler for Balancer {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                match rq.server_id() {
-                    Some(x) => {
-                        if self.server_sender.lock().contains_key(&x) {
-                            let sender = self.server_sender.lock()[&x].clone();
-                            let aux = sender.send(None);
-                            match aux {
-                                Ok(_) => {
-                                    sender.send(Some(rq));
-                                }
-                                Err(_) => {
-                                    let coordinator_guard = self.coordinator.lock();
-                                    let x = coordinator_guard.get_random_server();
-                                    rq.set_server_id(x);
-                                    if !self.server_sender.lock().contains_key(&x) {
-                                        self.server_sender.lock().insert(
-                                            x,
-                                            coordinator_guard.get_low_priority_sender(x),
-                                        );
-                                    }
-                                    rq.respond_with_err(
-                                        "No Ticket Reservation allowed anymore on this server",
-                                    );
-                                }
-                            }
-                        } else {
-                            let mut coordinator_guard = self.coordinator.lock();
-                            coordinator_guard.update_servers();
-                            if !coordinator_guard.map_id_index.contains_key(&x) {
-                                let x = self.coordinator.lock().get_random_server();
-                                rq.set_server_id(x);
-                                rq.respond_with_err(
-                                    "No Ticket Reservation allowed anymore on this server",
-                                );
-                            } else {
-                                self.server_sender
-                                    .lock()
-                                    .insert(x, coordinator_guard.get_low_priority_sender(x));
-                                // forward the request to the server
-                                let server_sender = self.server_sender.lock()[&x].clone();
-                                let _ = server_sender.send(Some(rq));
-                            }
-                        }
-                    }
+                // get server Uuid from request or assign new server
+                let server_no = match rq.server_id() {
+                    Some(n) => n,
                     None => {
-                        let coordinator_guard = self.coordinator.lock();
-                        let x = coordinator_guard.get_random_server();
-                        rq.set_server_id(x);
-                        if !self.server_sender.lock().contains_key(&x) {
-                            self.server_sender
-                                .lock()
-                                .insert(x, coordinator_guard.get_low_priority_sender(x));
+                        if self.coordinator.lock().no_active_servers == 0 {
+                            rq.respond_with_err("no server available");
+                            return;
                         }
-                        let server_sender = self.server_sender.lock()[&x].clone();
-                        let _ = server_sender.send(Some(rq));
+                        let x = self.coordinator.lock().get_random_server();
+                        rq.set_server_id(x);
+                        x
                     }
+                };
+                self.coordinator.lock().update_servers();
+                if !self
+                    .coordinator
+                    .lock()
+                    .map_id_index
+                    .contains_key(&server_no)
+                {
+                    let x = self.coordinator.lock().get_random_server();
+                    rq.set_server_id(x);
+                    rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
+                } else {
+                    // forward the request to the server
+                    let server_sender = self.coordinator.lock().get_low_priority_sender(server_no);
+                    let _ = server_sender.send(rq);
                 }
             }
         }

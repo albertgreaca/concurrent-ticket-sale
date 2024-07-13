@@ -25,7 +25,7 @@ pub struct Coordinator {
     pub no_active_servers: u32,
     pub map_id_index: HashMap<Uuid, usize>,
     pub server_id_list: Vec<Uuid>,
-    low_priority_sender_list: Vec<Sender<Option<Request>>>,
+    low_priority_sender_list: Vec<Sender<Request>>,
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,
 
@@ -75,7 +75,7 @@ impl Coordinator {
     }
 
     /// Get the channel for sending user requests to the server with the given id
-    pub fn get_low_priority_sender(&self, id: Uuid) -> Sender<Option<Request>> {
+    pub fn get_low_priority_sender(&self, id: Uuid) -> Sender<Request> {
         if self.map_id_index.contains_key(&id) {
             self.low_priority_sender_list[self.map_id_index[&id]].clone()
         } else {
