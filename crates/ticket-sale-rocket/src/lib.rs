@@ -1,4 +1,4 @@
-//! 🚀 Your implementation of the ticket sales system must go here.
+//! :rocket: Your implementation of the ticket sales system must go here.
 //!
 //! We already provide you with a skeleton of classes for the components of the
 //! system: The [database], [load balancer][balancer], [coordinator],
@@ -9,7 +9,7 @@
 //! communication.
 
 #![allow(rustdoc::private_intra_doc_links)]
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::thread;
 
 use crossbeam::channel::unbounded;
@@ -30,10 +30,10 @@ use database::Database;
 
 /// Entrypoint of your implementation
 ///
-/// 📌 Hint: The function must construct a balancer which is served requests by the
+/// :pushpin: Hint: The function must construct a balancer which is served requests by the
 /// surrounding infrastructure.
 ///
-/// ⚠️ This functions must not be renamed and its signature must not be changed.
+/// :warning: This functions must not be renamed and its signature must not be changed.
 pub fn launch(config: &Config) -> Balancer {
     if config.bonus {
         todo!("Bonus not implemented!")
@@ -48,17 +48,16 @@ pub fn launch(config: &Config) -> Balancer {
     coordinator
         .lock()
         .scale_to(config.initial_servers, coordinator.clone());
-    let estimator_term = Arc::new(Mutex::new(0));
-    let estimator_term2 = estimator_term.clone();
+    let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
     let mut estimator = Estimator::new(
         database.clone(),
         coordinator.clone(),
         config.estimator_roundtrip_time,
         est_rec,
-        estimator_term,
+        estimator_shutdown_receiver,
     );
     let other_thread = thread::spawn(move || {
         estimator.run();
     });
-    Balancer::new(coordinator.clone(), estimator_term2, other_thread)
+    Balancer::new(coordinator.clone(), estimator_shutdown_sender, other_thread)
 }

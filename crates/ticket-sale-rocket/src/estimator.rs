@@ -1,6 +1,6 @@
 //! Implementation of the estimator
-use std::sync::Arc;
-use std::{collections::HashMap, thread::sleep, time::Duration};
+use std::sync::{mpsc, Arc};
+use std::{collections::HashMap, time::Duration};
 
 use crossbeam::channel::Receiver;
 use parking_lot::Mutex;
@@ -17,7 +17,7 @@ pub struct Estimator {
     roundtrip_secs: u32,
     tickets_in_server: HashMap<Uuid, u32>,
     receive_from_server: Receiver<u32>,
-    estimator_term: Arc<Mutex<u32>>,
+    estimator_shutdown: mpsc::Receiver<()>,
 }
 
 impl Estimator {
@@ -32,7 +32,7 @@ impl Estimator {
         coordinator: Arc<Mutex<Coordinator>>,
         roundtrip_secs: u32,
         receive_from_server: Receiver<u32>,
-        estimator_term: Arc<Mutex<u32>>,
+        estimator_shutdown: mpsc::Receiver<()>,
     ) -> Self {
         Self {
             coordinator,
@@ -40,23 +40,23 @@ impl Estimator {
             roundtrip_secs,
             tickets_in_server: HashMap::new(),
             receive_from_server,
-            estimator_term,
+            estimator_shutdown,
         }
     }
 
     pub fn run(&mut self) {
         let mut sum = 0;
-        while Arc::strong_count(&self.estimator_term) > 1 {
+        loop {
+            let mut stop = false;
             let mut guard2 = self.coordinator.lock();
             let (servers, senders) = guard2.get_estimator();
             drop(guard2);
             let guard = self.database.lock();
             let tickets = guard.get_num_available();
             drop(guard);
+            let time = (self.roundtrip_secs as f64) / (servers.len() as f64);
+            let rounded_time = (time * 1000f64).floor() as u64;
             for (server, sender) in servers.iter().zip(senders.iter()) {
-                if Arc::strong_count(&self.estimator_term) <= 1 {
-                    break;
-                }
                 if !self.tickets_in_server.contains_key(server) {
                     self.tickets_in_server.insert(*server, 0);
                 }
@@ -74,9 +74,16 @@ impl Estimator {
                     }
                 }
                 sum += self.tickets_in_server[server];
-                let time = (self.roundtrip_secs as f64) / (servers.len() as f64);
-                let rounded_time = (time * 1000f64).floor() as u64;
-                sleep(Duration::from_millis(rounded_time));
+                if let Ok(_) = self
+                    .estimator_shutdown
+                    .recv_timeout(Duration::from_millis(rounded_time))
+                {
+                    stop = true;
+                    break;
+                }
+            }
+            if stop {
+                break;
             }
         }
     }

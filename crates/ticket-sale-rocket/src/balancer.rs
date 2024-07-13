@@ -1,12 +1,11 @@
 //! Implementation of the load balancer
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 
 use super::coordinator::Coordinator;
-use super::estimator::Estimator;
 /// Implementation of the load balancer
 ///
 /// ⚠️ This struct must implement the [`RequestHandler`] trait, and it must be
@@ -14,7 +13,7 @@ use super::estimator::Estimator;
 /// `ticket_sale_rocket::Balancer`).
 pub struct Balancer {
     coordinator: Arc<Mutex<Coordinator>>,
-    estimator_term: Arc<Mutex<u32>>,
+    estimator_shutdown: mpsc::Sender<()>,
     other_thread: JoinHandle<()>,
 }
 
@@ -22,12 +21,12 @@ impl Balancer {
     /// Create a new [`Balancer`]
     pub fn new(
         coordinator: Arc<Mutex<Coordinator>>,
-        estimator_term: Arc<Mutex<u32>>,
+        estimator_shutdown: mpsc::Sender<()>,
         other_thread: JoinHandle<()>,
     ) -> Self {
         Self {
             coordinator,
-            estimator_term,
+            estimator_shutdown,
             other_thread,
         }
     }
@@ -96,7 +95,7 @@ impl RequestHandler for Balancer {
     }
 
     fn shutdown(self) {
-        drop(self.estimator_term);
+        self.estimator_shutdown.send(());
         self.other_thread.join().unwrap();
         self.coordinator.lock().shutdown();
     }
