@@ -74,9 +74,9 @@ impl Estimator {
                     }
                 }
                 sum += self.tickets_in_server[server];
-                sleep(Duration::from_secs(
-                    (self.roundtrip_secs / servers.len() as u32) as u64,
-                ));
+                let time = (self.roundtrip_secs as f64) / (servers.len() as f64);
+                let rounded_time = (time * 1000f64).floor() as u64;
+                sleep(Duration::from_millis(rounded_time));
             }
         }
     }
