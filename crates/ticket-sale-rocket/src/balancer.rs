@@ -98,7 +98,22 @@ impl RequestHandler for Balancer {
                                 }
                             }
                         } else {
-                            panic!("what the fuck");
+                            let mut coordinator_guard = self.coordinator.lock();
+                            coordinator_guard.update_servers();
+                            if !coordinator_guard.map_id_index.contains_key(&x) {
+                                let x = self.coordinator.lock().get_random_server();
+                                rq.set_server_id(x);
+                                rq.respond_with_err(
+                                    "No Ticket Reservation allowed anymore on this server",
+                                );
+                            } else {
+                                self.server_sender
+                                    .lock()
+                                    .insert(x, coordinator_guard.get_low_priority_sender(x));
+                                // forward the request to the server
+                                let server_sender = self.server_sender.lock()[&x].clone();
+                                let _ = server_sender.send(Some(rq));
+                            }
                         }
                     }
                     None => {
