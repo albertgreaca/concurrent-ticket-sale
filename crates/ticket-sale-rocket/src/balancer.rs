@@ -14,7 +14,7 @@ use super::estimator::Estimator;
 /// `ticket_sale_rocket::Balancer`).
 pub struct Balancer {
     coordinator: Arc<Mutex<Coordinator>>,
-    estimator: Arc<Mutex<Estimator>>,
+    estimator_term: Arc<Mutex<u32>>,
     other_thread: JoinHandle<()>,
 }
 
@@ -22,12 +22,12 @@ impl Balancer {
     /// Create a new [`Balancer`]
     pub fn new(
         coordinator: Arc<Mutex<Coordinator>>,
-        estimator: Arc<Mutex<Estimator>>,
+        estimator_term: Arc<Mutex<u32>>,
         other_thread: JoinHandle<()>,
     ) -> Self {
         Self {
             coordinator,
-            estimator,
+            estimator_term,
             other_thread,
         }
     }
@@ -96,7 +96,7 @@ impl RequestHandler for Balancer {
     }
 
     fn shutdown(self) {
-        drop(self.estimator);
+        drop(self.estimator_term);
         self.other_thread.join().unwrap();
         self.coordinator.lock().shutdown();
     }
