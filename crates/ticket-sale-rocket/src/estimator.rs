@@ -70,9 +70,10 @@ impl Estimator {
                     }
                 }
                 sum += self.tickets_in_server[server];
-                if let Ok(_) = self
+                if self
                     .estimator_shutdown
                     .recv_timeout(Duration::from_millis(rounded_time))
+                    .is_ok()
                 {
                     stop = true;
                     break;

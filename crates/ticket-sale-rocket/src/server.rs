@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crossbeam::channel::{Receiver, Sender};
+use crossbeam::select;
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
@@ -61,7 +62,7 @@ impl Server {
         }
     }
 
-    pub fn get_low_priority_receiver(&mut self) -> &Receiver<Request> {
+    pub fn get_low_priority_receiver(&self) -> &Receiver<Request> {
         match &self.low_priority {
             Some(value) => value,
             None => {
@@ -70,7 +71,7 @@ impl Server {
         }
     }
 
-    pub fn get_high_priority_receiver(&mut self) -> &Receiver<HighPriorityServerRequest> {
+    pub fn get_high_priority_receiver(&self) -> &Receiver<HighPriorityServerRequest> {
         match &self.high_priority {
             Some(value) => value,
             None => {
@@ -81,9 +82,9 @@ impl Server {
 
     pub fn run(&mut self) {
         loop {
-            self.cycle();
+            self.process_request();
             if self.status == 2 {
-                while self.terminate_cycle() {}
+                while self.terminate() {}
                 if self.status == 2 {
                     let high_priority_channel = self.high_priority.take().unwrap();
                     drop(high_priority_channel);
@@ -107,7 +108,7 @@ impl Server {
         }
     }
 
-    pub fn terminate_cycle(&mut self) -> bool {
+    pub fn terminate(&mut self) -> bool {
         let high_priority_channel = self.get_high_priority_receiver();
         if let Ok(value) = high_priority_channel.try_recv() {
             match value {
@@ -129,7 +130,7 @@ impl Server {
         }
     }
 
-    pub fn cycle(&mut self) {
+    pub fn process_request(&mut self) {
         let high_priority_channel = self.get_high_priority_receiver();
         match high_priority_channel.try_recv() {
             Ok(value) => {
@@ -149,8 +150,52 @@ impl Server {
             }
             Err(_) => {
                 let low_priority_channel = self.get_low_priority_receiver();
-                if let Ok(value) = low_priority_channel.try_recv() {
-                    self.handle_request(value);
+                match low_priority_channel.try_recv() {
+                    Ok(value) => {
+                        self.handle_request(value);
+                    }
+                    Err(_) => {
+                        self.wait();
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn wait(&mut self) {
+        let high_priority_channel = self.get_high_priority_receiver();
+        let low_priority_channel = self.get_low_priority_receiver();
+        select! {
+            recv(high_priority_channel) -> msg => {
+                match msg {
+                    Ok(value) => {
+                        match value {
+                            HighPriorityServerRequest::DeActivate { activate } => {
+                                if activate {
+                                    self.activate()
+                                } else {
+                                    self.deactivate()
+                                }
+                            }
+                            HighPriorityServerRequest::Shutdown => self.status = 3,
+                            HighPriorityServerRequest::Estimate { tickets } => {
+                                self.send_tickets(tickets);
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        panic!("what the fuck");
+                    }
+                }
+            }
+            recv(low_priority_channel) -> msg => {
+                match msg {
+                    Ok(value) => {
+                        self.handle_request(value);
+                    }
+                    Err(_) => {
+                        panic!("what the fuck");
+                    }
                 }
             }
         }
