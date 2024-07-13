@@ -67,27 +67,31 @@ impl RequestHandler for Balancer {
             }
             _ => {
                 // get server Uuid from request or assign new server
-                let mut coordinator_guard = self.coordinator.lock();
                 let server_no = match rq.server_id() {
                     Some(n) => n,
                     None => {
-                        if coordinator_guard.no_active_servers == 0 {
+                        if self.coordinator.lock().no_active_servers == 0 {
                             rq.respond_with_err("no server available");
                             return;
                         }
-                        let x = coordinator_guard.get_random_server();
+                        let x = self.coordinator.lock().get_random_server();
                         rq.set_server_id(x);
                         x
                     }
                 };
-                coordinator_guard.update_servers();
-                if !coordinator_guard.map_id_index.contains_key(&server_no) {
-                    let x = coordinator_guard.get_random_server();
+                self.coordinator.lock().update_servers();
+                if !self
+                    .coordinator
+                    .lock()
+                    .map_id_index
+                    .contains_key(&server_no)
+                {
+                    let x = self.coordinator.lock().get_random_server();
                     rq.set_server_id(x);
                     rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
                 } else {
                     // forward the request to the server
-                    let server_sender = coordinator_guard.get_low_priority_sender(server_no);
+                    let server_sender = self.coordinator.lock().get_low_priority_sender(server_no);
                     let _ = server_sender.send(rq);
                 }
             }

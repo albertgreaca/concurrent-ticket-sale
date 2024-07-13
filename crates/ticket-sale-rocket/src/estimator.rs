@@ -48,12 +48,8 @@ impl Estimator {
         let mut sum = 0;
         loop {
             let mut stop = false;
-            let mut guard2 = self.coordinator.lock();
-            let (servers, senders) = guard2.get_estimator();
-            drop(guard2);
-            let guard = self.database.lock();
-            let tickets = guard.get_num_available();
-            drop(guard);
+            let (servers, senders) = self.coordinator.lock().get_estimator();
+            let tickets = self.database.lock().get_num_available();
             let time = (self.roundtrip_secs as f64) / (servers.len() as f64);
             let rounded_time = (time * 1000f64).floor() as u64;
             for (server, sender) in servers.iter().zip(senders.iter()) {
