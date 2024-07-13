@@ -45,13 +45,19 @@ impl Estimator {
     }
 
     pub fn run(&mut self) {
-        let mut sum = 0;
         loop {
             let mut stop = false;
             let (servers, senders) = self.coordinator.lock().get_estimator();
             let tickets = self.database.lock().get_num_available();
             let time = (self.roundtrip_secs as f64) / (servers.len() as f64);
             let rounded_time = (time * 1000f64).floor() as u64;
+            let mut sum = 0;
+            for server in servers.clone() {
+                if !self.tickets_in_server.contains_key(&server) {
+                    self.tickets_in_server.insert(server, 0);
+                }
+                sum += self.tickets_in_server[&server];
+            }
             for (server, sender) in servers.iter().zip(senders.iter()) {
                 if !self.tickets_in_server.contains_key(server) {
                     self.tickets_in_server.insert(*server, 0);
@@ -70,6 +76,7 @@ impl Estimator {
                     }
                 }
                 sum += self.tickets_in_server[server];
+                println!("{}", sum + tickets);
                 if self
                     .estimator_shutdown
                     .recv_timeout(Duration::from_millis(rounded_time))
