@@ -76,7 +76,6 @@ impl Estimator {
                     }
                 }
                 sum += self.tickets_in_server[server];
-                println!("{}", sum + tickets);
                 if self
                     .estimator_shutdown
                     .recv_timeout(Duration::from_millis(rounded_time))
