@@ -83,10 +83,15 @@ impl RequestHandler for Balancer {
                                     sender.send(Some(rq));
                                 }
                                 Err(_) => {
-                                    let x = self.coordinator.lock().get_random_server();
+                                    let coordinator_guard = self.coordinator.lock();
+                                    let x = coordinator_guard.get_random_server();
                                     rq.set_server_id(x);
-                                    *self.server_sender.lock().get_mut(&x).unwrap() =
-                                        self.coordinator.lock().get_low_priority_sender(x);
+                                    if !self.server_sender.lock().contains_key(&x) {
+                                        self.server_sender.lock().insert(
+                                            x,
+                                            coordinator_guard.get_low_priority_sender(x),
+                                        );
+                                    }
                                     rq.respond_with_err(
                                         "No Ticket Reservation allowed anymore on this server",
                                     );
@@ -97,13 +102,16 @@ impl RequestHandler for Balancer {
                         }
                     }
                     None => {
-                        let x = self.coordinator.lock().get_random_server();
+                        let coordinator_guard = self.coordinator.lock();
+                        let x = coordinator_guard.get_random_server();
                         rq.set_server_id(x);
-                        self.server_sender
-                            .lock()
-                            .insert(x, self.coordinator.lock().get_low_priority_sender(x));
+                        if !self.server_sender.lock().contains_key(&x) {
+                            self.server_sender
+                                .lock()
+                                .insert(x, coordinator_guard.get_low_priority_sender(x));
+                        }
                         let server_sender = self.server_sender.lock()[&x].clone();
-                        server_sender.send(Some(rq));
+                        let _ = server_sender.send(Some(rq));
                     }
                 }
             }
