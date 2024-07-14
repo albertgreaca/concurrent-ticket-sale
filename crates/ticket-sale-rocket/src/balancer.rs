@@ -15,7 +15,7 @@ use super::coordinator::Coordinator;
 pub struct Balancer {
     coordinator: Arc<Mutex<Coordinator>>,
     estimator_shutdown: mpsc::Sender<()>,
-    other_thread: JoinHandle<()>,
+    estimator_thread: JoinHandle<()>,
 }
 
 impl Balancer {
@@ -23,12 +23,12 @@ impl Balancer {
     pub fn new(
         coordinator: Arc<Mutex<Coordinator>>,
         estimator_shutdown: mpsc::Sender<()>,
-        other_thread: JoinHandle<()>,
+        estimator_thread: JoinHandle<()>,
     ) -> Self {
         Self {
             coordinator,
             estimator_shutdown,
-            other_thread,
+            estimator_thread,
         }
     }
     /// forward a user request to a given server
@@ -107,7 +107,7 @@ impl RequestHandler for Balancer {
     fn shutdown(self) {
         // tell the estimator to shut down
         let _ = self.estimator_shutdown.send(());
-        self.other_thread.join().unwrap();
+        self.estimator_thread.join().unwrap();
         // tell servers to shut down
         self.coordinator.lock().shutdown();
     }

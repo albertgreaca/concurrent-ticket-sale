@@ -22,16 +22,24 @@ pub struct Coordinator {
     /// To be handed over to new servers.
     database: Arc<Mutex<Database>>,
 
+    /// number of non-terminating servers
     pub no_active_servers: u32,
+
+    /// map between the id of a server and its index in the lists
     pub map_id_index: HashMap<Uuid, usize>,
+
+    /// lists containing the id, sender for low/high priority requests and thread for each
+    /// server
     pub server_id_list: Vec<Uuid>,
     low_priority_sender_list: Vec<Sender<Request>>,
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,
 
+    /// channel through which servers send their id once they have fully terminated
     terminated_sender: Sender<Uuid>,
     terminated_receiver: Receiver<Uuid>,
 
+    /// channel through which servers send their number of tickets to the estimator
     estimator_sender: Sender<u32>,
 }
 
@@ -85,17 +93,19 @@ impl Coordinator {
 
     ///remove terminated servers from lists
     pub fn update_servers(&mut self) {
+        // while there is a server that just terminated
         while let Ok(uuid) = self.terminated_receiver.try_recv() {
-            // find the position of a terminating server
+            // find its position in the lists
             let index = self.map_id_index[&uuid];
             let n = self.server_id_list.len();
 
-            // if its not the last one, swap it with the last one
+            // if it is not the last one, swap it with the last one
             if index != n - 1 {
                 self.server_id_list.swap(index, n - 1);
                 self.low_priority_sender_list.swap(index, n - 1);
                 self.high_priority_sender_list.swap(index, n - 1);
                 self.thread_list.swap(index, n - 1);
+                // update the index of the swapped server
                 *self
                     .map_id_index
                     .get_mut(&self.server_id_list[index])
