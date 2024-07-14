@@ -64,7 +64,7 @@ impl RequestHandler for Balancer {
                         rq.respond_with_int(n);
                     }
                     None => {
-                        rq.respond_with_err("no. of servers is None");
+                        rq.respond_with_err("Our error: No. of servers is None.");
                     }
                 };
             }
@@ -84,7 +84,7 @@ impl RequestHandler for Balancer {
                             // if not, assign a new server and respond with error
                             let new_server = self.coordinator.lock().get_random_server();
                             rq.set_server_id(new_server);
-                            rq.respond_with_err("Server no longer exists");
+                            rq.respond_with_err("Our error: Server no longer exists.");
                         } else {
                             // if yes, forward the request to the server
                             self.send_to(server, rq);

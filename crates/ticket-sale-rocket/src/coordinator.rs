@@ -87,7 +87,7 @@ impl Coordinator {
         if self.map_id_index.contains_key(&id) {
             self.low_priority_sender_list[self.map_id_index[&id]].clone()
         } else {
-            panic!("low priority sender not found");
+            panic!("Our panic: Low priority sender not found.");
         }
     }
 

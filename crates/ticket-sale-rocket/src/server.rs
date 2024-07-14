@@ -79,7 +79,7 @@ impl Server {
         match &self.low_priority {
             Some(value) => value,
             None => {
-                panic!("Our error: couldn't get low priority receiver");
+                panic!("Our panic: couldn't get low priority receiver");
             }
         }
     }
@@ -89,7 +89,7 @@ impl Server {
         match &self.high_priority {
             Some(value) => value,
             None => {
-                panic!("Our error: couldn't get high priority receiver");
+                panic!("Our panic: couldn't get high priority receiver");
             }
         }
     }
