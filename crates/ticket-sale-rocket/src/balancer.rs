@@ -4,6 +4,7 @@ use std::thread::JoinHandle;
 
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
+use uuid::Uuid;
 
 use super::coordinator::Coordinator;
 /// Implementation of the load balancer
@@ -29,6 +30,13 @@ impl Balancer {
             estimator_shutdown,
             other_thread,
         }
+    }
+    /// forward a user request to a given server
+    fn send_to(&self, server: Uuid, rq: Request) {
+        // get the sender channel for the server
+        let sender = self.coordinator.lock().get_low_priority_sender(server);
+        // send the request
+        let _ = sender.send(rq);
     }
 }
 
@@ -66,41 +74,41 @@ impl RequestHandler for Balancer {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                // get server Uuid from request or assign new server
-                let server_no = match rq.server_id() {
-                    Some(n) => n,
-                    None => {
-                        if self.coordinator.lock().no_active_servers == 0 {
-                            rq.respond_with_err("no server available");
-                            return;
+                match rq.server_id() {
+                    // request already has a server
+                    Some(server) => {
+                        // remove servers that terminated
+                        self.coordinator.lock().update_servers();
+                        // make sure assigned server still exists afterwards
+                        if !self.coordinator.lock().map_id_index.contains_key(&server) {
+                            // if not, assign a new server and respond with error
+                            let new_server = self.coordinator.lock().get_random_server();
+                            rq.set_server_id(new_server);
+                            rq.respond_with_err(
+                                "No Ticket Reservation allowed anymore on this server",
+                            );
+                        } else {
+                            // if yes, forward the request to the server
+                            self.send_to(server, rq);
                         }
-                        let x = self.coordinator.lock().get_random_server();
-                        rq.set_server_id(x);
-                        x
+                    }
+                    // request doesn't have a server
+                    None => {
+                        // assign a server and forward the request to the server
+                        let server = self.coordinator.lock().get_random_server();
+                        rq.set_server_id(server);
+                        self.send_to(server, rq);
                     }
                 };
-                self.coordinator.lock().update_servers();
-                if !self
-                    .coordinator
-                    .lock()
-                    .map_id_index
-                    .contains_key(&server_no)
-                {
-                    let x = self.coordinator.lock().get_random_server();
-                    rq.set_server_id(x);
-                    rq.respond_with_err("No Ticket Reservation allowed anymore on this server");
-                } else {
-                    // forward the request to the server
-                    let server_sender = self.coordinator.lock().get_low_priority_sender(server_no);
-                    let _ = server_sender.send(rq);
-                }
             }
         }
     }
 
     fn shutdown(self) {
-        self.estimator_shutdown.send(());
+        // tell the estimator to shut down
+        let _ = self.estimator_shutdown.send(());
         self.other_thread.join().unwrap();
+        // tell servers to shut down
         self.coordinator.lock().shutdown();
     }
 }
