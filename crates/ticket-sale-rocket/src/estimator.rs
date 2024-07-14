@@ -54,7 +54,7 @@ impl Estimator {
         loop {
             let mut stop = false; // becomes true when the estimator needs to shut down
 
-            // get non-terminated servers and the sender for high priority requests
+            // get non-terminated servers and the senders for high priority requests
             let (servers, senders) = self.coordinator.lock().get_estimator();
 
             // get number of tickets in the database

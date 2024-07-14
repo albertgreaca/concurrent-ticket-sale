@@ -84,9 +84,7 @@ impl RequestHandler for Balancer {
                             // if not, assign a new server and respond with error
                             let new_server = self.coordinator.lock().get_random_server();
                             rq.set_server_id(new_server);
-                            rq.respond_with_err(
-                                "No Ticket Reservation allowed anymore on this server",
-                            );
+                            rq.respond_with_err("Server no longer exists");
                         } else {
                             // if yes, forward the request to the server
                             self.send_to(server, rq);

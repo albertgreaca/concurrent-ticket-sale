@@ -147,12 +147,12 @@ impl Coordinator {
                 // Create the server
                 let mut server = Server::new(
                     self.database.clone(),
+                    coordinator.clone(),
                     self.reservation_timeout,
                     low_priority_receiver,
                     high_priority_receiver,
                     self.terminated_sender.clone(),
                     self.estimator_sender.clone(),
-                    coordinator.clone(),
                 );
                 let server_id = server.id;
 
