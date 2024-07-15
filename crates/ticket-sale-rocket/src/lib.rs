@@ -43,16 +43,19 @@ pub fn launch(config: &Config) -> Balancer {
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
     let (est_send, est_rec) = unbounded();
+    let (terminated_sender, terminated_receiver) = unbounded();
     let coordinator = Arc::new(RwLock::new(Coordinator::new(
         config.timeout,
         database.clone(),
         est_send,
+        terminated_sender,
     )));
     coordinator
         .write()
         .scale_to(config.initial_servers, coordinator.clone());
 
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
+
     let mut estimator = Estimator::new(
         database.clone(),
         coordinator.clone(),
@@ -64,5 +67,14 @@ pub fn launch(config: &Config) -> Balancer {
         estimator.run();
     });
 
-    Balancer::new(coordinator.clone(), estimator_shutdown_sender, other_thread)
+    Balancer::new(
+        coordinator.clone(),
+        estimator_shutdown_sender,
+        other_thread,
+        RwLock::new(coordinator.clone().read().no_active_servers),
+        RwLock::new(coordinator.clone().read().map_id_index.clone()),
+        RwLock::new(coordinator.clone().read().server_id_list.clone()),
+        RwLock::new(coordinator.clone().read().low_priority_sender_list.clone()),
+        terminated_receiver,
+    )
 }

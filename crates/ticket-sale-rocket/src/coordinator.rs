@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
+use dashmap::DashMap;
 use parking_lot::{Mutex, RwLock};
 use rand::Rng;
 use ticket_sale_core::Request;
@@ -31,13 +32,15 @@ pub struct Coordinator {
     /// lists containing the id, sender for low/high priority requests and thread for each
     /// server
     pub server_id_list: Vec<Uuid>,
-    low_priority_sender_list: Vec<Sender<Request>>,
+    pub low_priority_sender_list: Vec<Sender<Request>>,
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,
 
     /// channel through which servers send their id once they have fully terminated
     terminated_sender: Sender<Uuid>,
     terminated_receiver: Receiver<Uuid>,
+
+    terminated_sender2: Sender<Uuid>,
 
     /// channel through which servers send their number of tickets to the estimator
     estimator_sender: Sender<u32>,
@@ -49,6 +52,7 @@ impl Coordinator {
         reservation_timeout: u32,
         database: Arc<Mutex<Database>>,
         estimator_sender: Sender<u32>,
+        terminated_sender2: Sender<Uuid>,
     ) -> Self {
         let (terminated_sender, terminated_receiver) = unbounded();
         Self {
@@ -63,6 +67,7 @@ impl Coordinator {
             terminated_sender,
             terminated_receiver,
             estimator_sender,
+            terminated_sender2,
         }
     }
 
@@ -85,7 +90,7 @@ impl Coordinator {
     /// Get the channel for sending user requests to the server with the given id
     pub fn get_low_priority_sender(&self, id: Uuid) -> Sender<Request> {
         if self.map_id_index.contains_key(&id) {
-            self.low_priority_sender_list[self.map_id_index[&id]].clone()
+            self.low_priority_sender_list[*self.map_id_index.get(&id).unwrap()].clone()
         } else {
             panic!("Our panic: Low priority sender not found.");
         }
@@ -96,7 +101,7 @@ impl Coordinator {
         // while there is a server that just terminated
         while let Ok(uuid) = self.terminated_receiver.try_recv() {
             // find its position in the lists
-            let index = self.map_id_index[&uuid];
+            let index = *self.map_id_index.get(&uuid).unwrap();
             let n = self.server_id_list.len();
 
             // if it is not the last one, swap it with the last one
@@ -152,6 +157,7 @@ impl Coordinator {
                     low_priority_receiver,
                     high_priority_receiver,
                     self.terminated_sender.clone(),
+                    self.terminated_sender2.clone(),
                     self.estimator_sender.clone(),
                 );
                 let server_id = server.id;

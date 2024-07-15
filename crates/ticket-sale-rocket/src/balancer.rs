@@ -1,12 +1,15 @@
 //! Implementation of the load balancer
+use std::collections::HashMap;
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
+use crossbeam::channel::{Receiver, Sender};
 use parking_lot::RwLock;
+use rand::Rng;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
-use super::coordinator::Coordinator;
+use crate::coordinator::Coordinator;
 /// Implementation of the load balancer
 ///
 /// ⚠️ This struct must implement the [`RequestHandler`] trait, and it must be
@@ -16,6 +19,11 @@ pub struct Balancer {
     coordinator: Arc<RwLock<Coordinator>>,
     estimator_shutdown: mpsc::Sender<()>,
     estimator_thread: JoinHandle<()>,
+    no_active_servers: RwLock<u32>,
+    pub map_id_index: RwLock<HashMap<Uuid, usize>>,
+    server_id_list: RwLock<Vec<Uuid>>,
+    low_priority_sender_list: RwLock<Vec<Sender<Request>>>,
+    terminated_receiver: Receiver<Uuid>,
 }
 
 impl Balancer {
@@ -24,17 +32,28 @@ impl Balancer {
         coordinator: Arc<RwLock<Coordinator>>,
         estimator_shutdown: mpsc::Sender<()>,
         estimator_thread: JoinHandle<()>,
+        no_active_servers: RwLock<u32>,
+        map_id_index: RwLock<HashMap<Uuid, usize>>,
+        server_id_list: RwLock<Vec<Uuid>>,
+        low_priority_sender_list: RwLock<Vec<Sender<Request>>>,
+        terminated_receiver: Receiver<Uuid>,
     ) -> Self {
         Self {
             coordinator,
             estimator_shutdown,
             estimator_thread,
+            no_active_servers,
+            map_id_index,
+            server_id_list,
+            low_priority_sender_list,
+            terminated_receiver,
         }
     }
     /// forward a user request to a given server
     fn send_to(&self, server: Uuid, rq: Request) {
         // get the sender channel for the server
-        let sender = self.coordinator.read().get_low_priority_sender(server);
+        let sender =
+            self.low_priority_sender_list.read()[self.map_id_index.read()[&server]].clone();
         // send the request
         let _ = sender.send(rq);
     }
@@ -48,11 +67,13 @@ impl RequestHandler for Balancer {
         match rq.kind() {
             RequestKind::GetNumServers => {
                 // get the number of servers with status 0
-                rq.respond_with_int(self.coordinator.read().get_num_active_servers());
+                rq.respond_with_int(*self.no_active_servers.read());
             }
             RequestKind::GetServers => {
                 // get the servers with status 0
-                rq.respond_with_server_list(self.coordinator.read().get_active_servers());
+                rq.respond_with_server_list(
+                    &self.server_id_list.read()[0..*self.no_active_servers.read() as usize],
+                );
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
@@ -61,6 +82,12 @@ impl RequestHandler for Balancer {
                         self.coordinator
                             .write()
                             .scale_to(n, self.coordinator.clone());
+                        *self.no_active_servers.write() = n;
+                        *self.server_id_list.write() =
+                            self.coordinator.read().server_id_list.clone();
+                        *self.map_id_index.write() = self.coordinator.read().map_id_index.clone();
+                        *self.low_priority_sender_list.write() =
+                            self.coordinator.read().low_priority_sender_list.clone();
                         rq.respond_with_int(n);
                     }
                     None => {
@@ -78,11 +105,15 @@ impl RequestHandler for Balancer {
                     // request already has a server
                     Some(server) => {
                         // remove servers that terminated
-                        self.coordinator.write().update_servers();
+                        while let Ok(uuid) = self.terminated_receiver.try_recv() {
+                            self.map_id_index.write().remove(&uuid);
+                        }
                         // make sure assigned server still exists afterwards
-                        if !self.coordinator.read().map_id_index.contains_key(&server) {
+                        if !self.map_id_index.read().contains_key(&server) {
                             // if not, assign a new server and respond with error
-                            let new_server = self.coordinator.read().get_random_server();
+                            let mut rng = rand::thread_rng();
+                            let new_server = self.server_id_list.read()
+                                [rng.gen_range(0..*self.no_active_servers.read()) as usize];
                             rq.set_server_id(new_server);
                             rq.respond_with_err("Our error: Server no longer exists.");
                         } else {
@@ -93,7 +124,9 @@ impl RequestHandler for Balancer {
                     // request doesn't have a server
                     None => {
                         // assign a server and forward the request to the server
-                        let server = self.coordinator.read().get_random_server();
+                        let mut rng = rand::thread_rng();
+                        let server = self.server_id_list.read()
+                            [rng.gen_range(0..*self.no_active_servers.read()) as usize];
                         rq.set_server_id(server);
                         self.send_to(server, rq);
                     }

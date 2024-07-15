@@ -11,3 +11,4 @@ uuid = { version = "1", features = ["v4"] }
 rand = "0.8.5"
 crossbeam = "0.8.4"
 ticket-sale-core.workspace = true
+dashmap = "6.0.1"
