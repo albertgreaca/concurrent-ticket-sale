@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use rand::Rng;
 use ticket_sale_core::Request;
 use uuid::Uuid;
@@ -122,7 +122,7 @@ impl Coordinator {
     }
 
     /// Scale to the given number of servers
-    pub fn scale_to(&mut self, num_servers: u32, coordinator: Arc<Mutex<Coordinator>>) {
+    pub fn scale_to(&mut self, num_servers: u32, coordinator: Arc<RwLock<Coordinator>>) {
         // remove terminated servers
         self.update_servers();
 

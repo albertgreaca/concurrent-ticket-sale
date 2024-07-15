@@ -3,7 +3,7 @@ use std::sync::{mpsc, Arc};
 use std::{collections::HashMap, time::Duration};
 
 use crossbeam::channel::Receiver;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use uuid::Uuid;
 
 use super::coordinator::Coordinator;
@@ -12,8 +12,8 @@ use super::serverrequest::HighPriorityServerRequest;
 
 /// Estimator that estimates the number of tickets available overall
 pub struct Estimator {
-    coordinator: Arc<Mutex<Coordinator>>,
     database: Arc<Mutex<Database>>,
+    coordinator: Arc<RwLock<Coordinator>>,
     roundtrip_secs: u32,
 
     /// number of tickets known to be in each server
@@ -35,7 +35,7 @@ impl Estimator {
 
     pub fn new(
         database: Arc<Mutex<Database>>,
-        coordinator: Arc<Mutex<Coordinator>>,
+        coordinator: Arc<RwLock<Coordinator>>,
         roundtrip_secs: u32,
         receive_from_server: Receiver<u32>,
         estimator_shutdown: mpsc::Receiver<()>,
@@ -55,7 +55,7 @@ impl Estimator {
             let mut stop = false; // becomes true when the estimator needs to shut down
 
             // get non-terminated servers and the senders for high priority requests
-            let (servers, senders) = self.coordinator.lock().get_estimator();
+            let (servers, senders) = self.coordinator.write().get_estimator();
 
             // get number of tickets in the database
             let tickets = self.database.lock().get_num_available();

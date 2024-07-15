@@ -14,7 +14,7 @@ use std::thread;
 
 use crossbeam::channel::unbounded;
 use estimator::Estimator;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use ticket_sale_core::Config;
 
 mod balancer;
@@ -43,13 +43,13 @@ pub fn launch(config: &Config) -> Balancer {
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
     let (est_send, est_rec) = unbounded();
-    let coordinator = Arc::new(Mutex::new(Coordinator::new(
+    let coordinator = Arc::new(RwLock::new(Coordinator::new(
         config.timeout,
         database.clone(),
         est_send,
     )));
     coordinator
-        .lock()
+        .write()
         .scale_to(config.initial_servers, coordinator.clone());
 
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();

@@ -2,7 +2,7 @@
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
@@ -13,7 +13,7 @@ use super::coordinator::Coordinator;
 /// exposed from the crate root (to be used from the tester as
 /// `ticket_sale_rocket::Balancer`).
 pub struct Balancer {
-    coordinator: Arc<Mutex<Coordinator>>,
+    coordinator: Arc<RwLock<Coordinator>>,
     estimator_shutdown: mpsc::Sender<()>,
     estimator_thread: JoinHandle<()>,
 }
@@ -21,7 +21,7 @@ pub struct Balancer {
 impl Balancer {
     /// Create a new [`Balancer`]
     pub fn new(
-        coordinator: Arc<Mutex<Coordinator>>,
+        coordinator: Arc<RwLock<Coordinator>>,
         estimator_shutdown: mpsc::Sender<()>,
         estimator_thread: JoinHandle<()>,
     ) -> Self {
@@ -34,7 +34,7 @@ impl Balancer {
     /// forward a user request to a given server
     fn send_to(&self, server: Uuid, rq: Request) {
         // get the sender channel for the server
-        let sender = self.coordinator.lock().get_low_priority_sender(server);
+        let sender = self.coordinator.read().get_low_priority_sender(server);
         // send the request
         let _ = sender.send(rq);
     }
@@ -48,18 +48,18 @@ impl RequestHandler for Balancer {
         match rq.kind() {
             RequestKind::GetNumServers => {
                 // get the number of servers with status 0
-                rq.respond_with_int(self.coordinator.lock().get_num_active_servers());
+                rq.respond_with_int(self.coordinator.read().get_num_active_servers());
             }
             RequestKind::GetServers => {
                 // get the servers with status 0
-                rq.respond_with_server_list(self.coordinator.lock().get_active_servers());
+                rq.respond_with_server_list(self.coordinator.read().get_active_servers());
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
                     Some(n) => {
                         // set number of servers with status 0 to n
                         self.coordinator
-                            .lock()
+                            .write()
                             .scale_to(n, self.coordinator.clone());
                         rq.respond_with_int(n);
                     }
@@ -78,11 +78,11 @@ impl RequestHandler for Balancer {
                     // request already has a server
                     Some(server) => {
                         // remove servers that terminated
-                        self.coordinator.lock().update_servers();
+                        self.coordinator.write().update_servers();
                         // make sure assigned server still exists afterwards
-                        if !self.coordinator.lock().map_id_index.contains_key(&server) {
+                        if !self.coordinator.read().map_id_index.contains_key(&server) {
                             // if not, assign a new server and respond with error
-                            let new_server = self.coordinator.lock().get_random_server();
+                            let new_server = self.coordinator.read().get_random_server();
                             rq.set_server_id(new_server);
                             rq.respond_with_err("Our error: Server no longer exists.");
                         } else {
@@ -93,7 +93,7 @@ impl RequestHandler for Balancer {
                     // request doesn't have a server
                     None => {
                         // assign a server and forward the request to the server
-                        let server = self.coordinator.lock().get_random_server();
+                        let server = self.coordinator.read().get_random_server();
                         rq.set_server_id(server);
                         self.send_to(server, rq);
                     }
@@ -107,6 +107,6 @@ impl RequestHandler for Balancer {
         let _ = self.estimator_shutdown.send(());
         self.estimator_thread.join().unwrap();
         // tell servers to shut down
-        self.coordinator.lock().shutdown();
+        self.coordinator.write().shutdown();
     }
 }

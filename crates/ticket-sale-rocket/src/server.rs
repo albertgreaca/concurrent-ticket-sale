@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use crossbeam::channel::{Receiver, Sender};
 use crossbeam::select;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
@@ -22,7 +22,7 @@ pub struct Server {
     estimate: u32,
     /// The database
     database: Arc<Mutex<Database>>,
-    coordinator: Arc<Mutex<Coordinator>>,
+    coordinator: Arc<RwLock<Coordinator>>,
 
     /// current server status
     status: ServerStatus,
@@ -48,7 +48,7 @@ impl Server {
     /// Create a new [`Server`]
     pub fn new(
         database: Arc<Mutex<Database>>,
-        coordinator: Arc<Mutex<Coordinator>>,
+        coordinator: Arc<RwLock<Coordinator>>,
         timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
@@ -56,7 +56,7 @@ impl Server {
         estimator_sender: Sender<u32>,
     ) -> Server {
         let id = Uuid::new_v4();
-        let num_tickets = ((database.lock().get_num_available() as f64) / (10 as f64)).ceil() as u32;
+        let num_tickets = (database.lock().get_num_available() as f64).sqrt() as u32;
         let tickets = database.lock().allocate(num_tickets);
         Self {
             id,
@@ -117,7 +117,7 @@ impl Server {
                     // assign a new server to all low priority requests
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
-                        let coordinator_guard = self.coordinator.lock();
+                        let coordinator_guard = self.coordinator.read();
                         let x = coordinator_guard.get_random_server();
                         rq.set_server_id(x);
                         rq.respond_with_err("Our error: Server no longer exists.");
@@ -325,7 +325,7 @@ impl Server {
         // if the server is terminating
         if self.status == ServerStatus::Terminating {
             // assign a new server and respond with error
-            let coordinator_guard = self.coordinator.lock();
+            let coordinator_guard = self.coordinator.read();
             let x = coordinator_guard.get_random_server();
             rq.set_server_id(x);
             rq.respond_with_err("Our error: Ticket reservations no longer allowed on this server");
@@ -342,7 +342,7 @@ impl Server {
             }
 
             // get tickets from database
-            let num_tickets =  ((database_guard.get_num_available() as f64) / (10 as f64)).ceil() as u32;
+            let num_tickets = (database_guard.get_num_available() as f64).sqrt() as u32;
             self.tickets.extend(database_guard.allocate(num_tickets));
         }
 
