@@ -52,8 +52,7 @@ impl Balancer {
     /// forward a user request to a given server
     fn send_to(&self, server: Uuid, rq: Request) {
         // get the sender channel for the server
-        let sender =
-            self.low_priority_sender_list.read()[self.map_id_index.read()[&server]].clone();
+        let sender = self.coordinator.lock().get_low_priority_sender(server);
         // send the request
         let _ = sender.send(rq);
     }
@@ -67,13 +66,11 @@ impl RequestHandler for Balancer {
         match rq.kind() {
             RequestKind::GetNumServers => {
                 // get the number of servers with status 0
-                rq.respond_with_int(*self.no_active_servers.read());
+                rq.respond_with_int(self.coordinator.lock().get_num_active_servers());
             }
             RequestKind::GetServers => {
                 // get the servers with status 0
-                rq.respond_with_server_list(
-                    &self.server_id_list.read()[0..*self.no_active_servers.read() as usize],
-                );
+                rq.respond_with_server_list(self.coordinator.lock().get_active_servers());
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
