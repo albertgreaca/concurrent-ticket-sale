@@ -78,15 +78,19 @@ impl RequestHandler for Balancer {
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
                     Some(n) => {
+                        let mut no_active_servers_guard = self.no_active_servers.lock();
+                        let mut server_id_list_guard = self.server_id_list.lock();
+                        let mut map_id_index_guard = self.map_id_index.lock();
+                        let mut low_priority_sender_list_guard =
+                            self.low_priority_sender_list.lock();
                         // set number of servers with status 0 to n
                         self.coordinator
                             .lock()
                             .scale_to(n, self.coordinator.clone());
-                        *self.no_active_servers.lock() = n;
-                        *self.server_id_list.lock() =
-                            self.coordinator.lock().server_id_list.clone();
-                        *self.map_id_index.lock() = self.coordinator.lock().map_id_index.clone();
-                        *self.low_priority_sender_list.lock() =
+                        *no_active_servers_guard = n;
+                        *server_id_list_guard = self.coordinator.lock().server_id_list.clone();
+                        *map_id_index_guard = self.coordinator.lock().map_id_index.clone();
+                        *low_priority_sender_list_guard =
                             self.coordinator.lock().low_priority_sender_list.clone();
                         rq.respond_with_int(n);
                     }
