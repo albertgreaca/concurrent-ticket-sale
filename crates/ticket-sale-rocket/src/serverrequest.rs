@@ -1,5 +1,6 @@
 pub enum HighPriorityServerRequest {
-    DeActivate { activate: bool },
+    Activate,
+    Deactivate,
     Shutdown,
     Estimate { tickets: u32 },
 }

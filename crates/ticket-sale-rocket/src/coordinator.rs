@@ -134,7 +134,7 @@ impl Coordinator {
             {
                 // Get the channel for the server activation and activate the server
                 let _ = self.high_priority_sender_list[self.no_active_servers as usize]
-                    .send(HighPriorityServerRequest::DeActivate { activate: true });
+                    .send(HighPriorityServerRequest::Activate);
                 self.no_active_servers += 1;
             }
 
@@ -174,7 +174,7 @@ impl Coordinator {
             while self.no_active_servers > num_servers {
                 // Get the channel for the server deactivation and deactivate the server
                 let _ = self.high_priority_sender_list[(self.no_active_servers - 1) as usize]
-                    .send(HighPriorityServerRequest::DeActivate { activate: false });
+                    .send(HighPriorityServerRequest::Deactivate);
 
                 self.no_active_servers -= 1;
             }

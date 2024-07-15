@@ -39,8 +39,10 @@ pub fn launch(config: &Config) -> Balancer {
     if config.bonus {
         todo!("Bonus not implemented!")
     }
-    let (est_send, est_rec) = unbounded();
+
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
+
+    let (est_send, est_rec) = unbounded();
     let coordinator = Arc::new(Mutex::new(Coordinator::new(
         config.timeout,
         database.clone(),
@@ -49,6 +51,7 @@ pub fn launch(config: &Config) -> Balancer {
     coordinator
         .lock()
         .scale_to(config.initial_servers, coordinator.clone());
+
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
     let mut estimator = Estimator::new(
         database.clone(),
@@ -60,5 +63,6 @@ pub fn launch(config: &Config) -> Balancer {
     let other_thread = thread::spawn(move || {
         estimator.run();
     });
+
     Balancer::new(coordinator.clone(), estimator_shutdown_sender, other_thread)
 }

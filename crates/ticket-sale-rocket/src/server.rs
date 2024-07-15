@@ -208,13 +208,8 @@ impl Server {
     /// processes a given high priority request
     pub fn process_high_priority(&mut self, rq: HighPriorityServerRequest) {
         match rq {
-            HighPriorityServerRequest::DeActivate { activate } => {
-                if activate {
-                    self.activate()
-                } else {
-                    self.deactivate()
-                }
-            }
+            HighPriorityServerRequest::Activate => self.activate(),
+            HighPriorityServerRequest::Deactivate => self.deactivate(),
             HighPriorityServerRequest::Shutdown => self.status = ServerStatus::Shutdown,
             HighPriorityServerRequest::Estimate { tickets } => {
                 self.send_tickets(tickets);
