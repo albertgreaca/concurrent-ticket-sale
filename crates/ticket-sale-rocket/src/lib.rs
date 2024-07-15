@@ -14,7 +14,7 @@ use std::thread;
 
 use crossbeam::channel::unbounded;
 use estimator::Estimator;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use ticket_sale_core::Config;
 
 mod balancer;
@@ -44,14 +44,14 @@ pub fn launch(config: &Config) -> Balancer {
 
     let (est_send, est_rec) = unbounded();
     let (terminated_sender, terminated_receiver) = unbounded();
-    let coordinator = Arc::new(RwLock::new(Coordinator::new(
+    let coordinator = Arc::new(Mutex::new(Coordinator::new(
         config.timeout,
         database.clone(),
         est_send,
         terminated_sender,
     )));
     coordinator
-        .write()
+        .lock()
         .scale_to(config.initial_servers, coordinator.clone());
 
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
@@ -67,14 +67,18 @@ pub fn launch(config: &Config) -> Balancer {
         estimator.run();
     });
 
+    let no_active_servers = coordinator.lock().no_active_servers;
+    let map_id_index = coordinator.lock().map_id_index.clone();
+    let server_id_list = coordinator.lock().server_id_list.clone();
+    let low_priority_sender_list = coordinator.lock().low_priority_sender_list.clone();
     Balancer::new(
         coordinator.clone(),
         estimator_shutdown_sender,
         other_thread,
-        RwLock::new(coordinator.clone().read().no_active_servers),
-        RwLock::new(coordinator.clone().read().map_id_index.clone()),
-        RwLock::new(coordinator.clone().read().server_id_list.clone()),
-        RwLock::new(coordinator.clone().read().low_priority_sender_list.clone()),
+        Mutex::new(no_active_servers),
+        Mutex::new(map_id_index),
+        Mutex::new(server_id_list),
+        Mutex::new(low_priority_sender_list),
         terminated_receiver,
     )
 }

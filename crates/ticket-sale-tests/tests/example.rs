@@ -11,6 +11,7 @@ async fn test_example() -> Result<()> {
         .with_tickets(1_000)
         .build()
         .await?;
+    println!("Got here");
 
     // Create a new user session
     let mut session = ctx.api.create_user_session(None);

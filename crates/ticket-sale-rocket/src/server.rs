@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use crossbeam::channel::{Receiver, Sender};
 use crossbeam::select;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
@@ -22,7 +22,7 @@ pub struct Server {
     estimate: u32,
     /// The database
     database: Arc<Mutex<Database>>,
-    coordinator: Arc<RwLock<Coordinator>>,
+    coordinator: Arc<Mutex<Coordinator>>,
 
     /// current server status
     status: ServerStatus,
@@ -49,7 +49,7 @@ impl Server {
     /// Create a new [`Server`]
     pub fn new(
         database: Arc<Mutex<Database>>,
-        coordinator: Arc<RwLock<Coordinator>>,
+        coordinator: Arc<Mutex<Coordinator>>,
         timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
@@ -120,7 +120,7 @@ impl Server {
                     // assign a new server to all low priority requests
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
-                        let coordinator_guard = self.coordinator.read();
+                        let coordinator_guard = self.coordinator.lock();
                         let x = coordinator_guard.get_random_server();
                         rq.set_server_id(x);
                         rq.respond_with_err("Our error: Server no longer exists.");
@@ -329,7 +329,7 @@ impl Server {
         // if the server is terminating
         if self.status == ServerStatus::Terminating {
             // assign a new server and respond with error
-            let coordinator_guard = self.coordinator.read();
+            let coordinator_guard = self.coordinator.lock();
             let x = coordinator_guard.get_random_server();
             rq.set_server_id(x);
             rq.respond_with_err("Our error: Ticket reservations no longer allowed on this server");
