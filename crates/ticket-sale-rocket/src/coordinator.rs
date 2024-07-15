@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
-use dashmap::DashMap;
 use parking_lot::{Mutex, RwLock};
 use rand::Rng;
 use ticket_sale_core::Request;
