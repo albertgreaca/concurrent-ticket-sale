@@ -56,7 +56,7 @@ impl Server {
         estimator_sender: Sender<u32>,
     ) -> Server {
         let id = Uuid::new_v4();
-        let num_tickets = (database.lock().get_num_available() as f64).sqrt() as u32;
+        let num_tickets = ((database.lock().get_num_available() as f64) / (10 as f64)).ceil() as u32;
         let tickets = database.lock().allocate(num_tickets);
         Self {
             id,
@@ -342,7 +342,7 @@ impl Server {
             }
 
             // get tickets from database
-            let num_tickets = (database_guard.get_num_available() as f64).sqrt() as u32;
+            let num_tickets =  ((database_guard.get_num_available() as f64) / (10 as f64)).ceil() as u32;
             self.tickets.extend(database_guard.allocate(num_tickets));
         }
 
