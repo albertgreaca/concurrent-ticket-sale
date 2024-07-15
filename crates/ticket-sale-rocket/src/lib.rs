@@ -14,6 +14,7 @@ use std::thread;
 
 use crossbeam::channel::unbounded;
 use estimator::Estimator;
+use parking_lot::lock_api::RwLock;
 use parking_lot::Mutex;
 use ticket_sale_core::Config;
 
@@ -75,10 +76,10 @@ pub fn launch(config: &Config) -> Balancer {
         coordinator.clone(),
         estimator_shutdown_sender,
         other_thread,
-        Mutex::new(no_active_servers),
-        Mutex::new(map_id_index),
-        Mutex::new(server_id_list),
-        Mutex::new(low_priority_sender_list),
+        RwLock::new(no_active_servers),
+        RwLock::new(map_id_index),
+        RwLock::new(server_id_list),
+        RwLock::new(low_priority_sender_list),
         terminated_receiver,
     )
 }

@@ -4,7 +4,7 @@ use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
 use crossbeam::channel::{Receiver, Sender};
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use rand::Rng;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
@@ -19,10 +19,10 @@ pub struct Balancer {
     coordinator: Arc<Mutex<Coordinator>>,
     estimator_shutdown: mpsc::Sender<()>,
     estimator_thread: JoinHandle<()>,
-    no_active_servers: Mutex<u32>,
-    pub map_id_index: Mutex<HashMap<Uuid, usize>>,
-    server_id_list: Mutex<Vec<Uuid>>,
-    low_priority_sender_list: Mutex<Vec<Sender<Request>>>,
+    no_active_servers: RwLock<u32>,
+    pub map_id_index: RwLock<HashMap<Uuid, usize>>,
+    server_id_list: RwLock<Vec<Uuid>>,
+    low_priority_sender_list: RwLock<Vec<Sender<Request>>>,
     terminated_receiver: Receiver<Uuid>,
 }
 
@@ -32,10 +32,10 @@ impl Balancer {
         coordinator: Arc<Mutex<Coordinator>>,
         estimator_shutdown: mpsc::Sender<()>,
         estimator_thread: JoinHandle<()>,
-        no_active_servers: Mutex<u32>,
-        map_id_index: Mutex<HashMap<Uuid, usize>>,
-        server_id_list: Mutex<Vec<Uuid>>,
-        low_priority_sender_list: Mutex<Vec<Sender<Request>>>,
+        no_active_servers: RwLock<u32>,
+        map_id_index: RwLock<HashMap<Uuid, usize>>,
+        server_id_list: RwLock<Vec<Uuid>>,
+        low_priority_sender_list: RwLock<Vec<Sender<Request>>>,
         terminated_receiver: Receiver<Uuid>,
     ) -> Self {
         Self {
@@ -53,7 +53,7 @@ impl Balancer {
     fn send_to(&self, server: Uuid, rq: Request) {
         // get the sender channel for the server
         let sender =
-            self.low_priority_sender_list.lock()[self.map_id_index.lock()[&server]].clone();
+            self.low_priority_sender_list.read()[self.map_id_index.read()[&server]].clone();
         // send the request
         let _ = sender.send(rq);
     }
@@ -67,22 +67,22 @@ impl RequestHandler for Balancer {
         match rq.kind() {
             RequestKind::GetNumServers => {
                 // get the number of servers with status 0
-                rq.respond_with_int(*self.no_active_servers.lock());
+                rq.respond_with_int(*self.no_active_servers.read());
             }
             RequestKind::GetServers => {
                 // get the servers with status 0
                 rq.respond_with_server_list(
-                    &self.server_id_list.lock()[0..*self.no_active_servers.lock() as usize],
+                    &self.server_id_list.read()[0..*self.no_active_servers.read() as usize],
                 );
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
                     Some(n) => {
-                        let mut no_active_servers_guard = self.no_active_servers.lock();
-                        let mut server_id_list_guard = self.server_id_list.lock();
-                        let mut map_id_index_guard = self.map_id_index.lock();
+                        let mut no_active_servers_guard = self.no_active_servers.write();
+                        let mut server_id_list_guard = self.server_id_list.write();
+                        let mut map_id_index_guard = self.map_id_index.write();
                         let mut low_priority_sender_list_guard =
-                            self.low_priority_sender_list.lock();
+                            self.low_priority_sender_list.write();
                         // set number of servers with status 0 to n
                         self.coordinator
                             .lock()
@@ -110,14 +110,14 @@ impl RequestHandler for Balancer {
                     Some(server) => {
                         // remove servers that terminated
                         while let Ok(uuid) = self.terminated_receiver.try_recv() {
-                            self.map_id_index.lock().remove(&uuid);
+                            self.map_id_index.write().remove(&uuid);
                         }
                         // make sure assigned server still exists afterwards
-                        if !self.map_id_index.lock().contains_key(&server) {
+                        if !self.map_id_index.read().contains_key(&server) {
                             // if not, assign a new server and respond with error
                             let mut rng = rand::thread_rng();
-                            let new_server = self.server_id_list.lock()
-                                [rng.gen_range(0..*self.no_active_servers.lock()) as usize];
+                            let new_server = self.server_id_list.read()
+                                [rng.gen_range(0..*self.no_active_servers.read()) as usize];
                             rq.set_server_id(new_server);
                             rq.respond_with_err("Our error: Server no longer exists.");
                         } else {
@@ -129,8 +129,8 @@ impl RequestHandler for Balancer {
                     None => {
                         // assign a server and forward the request to the server
                         let mut rng = rand::thread_rng();
-                        let server = self.server_id_list.lock()
-                            [rng.gen_range(0..*self.no_active_servers.lock()) as usize];
+                        let server = self.server_id_list.read()
+                            [rng.gen_range(0..*self.no_active_servers.read()) as usize];
                         rq.set_server_id(server);
                         self.send_to(server, rq);
                     }
