@@ -12,6 +12,8 @@ use uuid::Uuid;
 use super::database::Database;
 use super::server::Server;
 use crate::serverrequest::HighPriorityServerRequest;
+use rayon::prelude::*;
+
 /// Coordinator orchestrating all the components of the system
 pub struct Coordinator {
     /// The reservation timeout
@@ -193,9 +195,8 @@ impl Coordinator {
 
     /// Shut down all servers
     pub fn shutdown(&mut self) {
-        for sender in self.high_priority_sender_list.iter() {
-            let _ = sender.send(HighPriorityServerRequest::Shutdown);
-        }
+        self.high_priority_sender_list.par_iter().for_each(|sender| sender.send(HighPriorityServerRequest::Shutdown).unwrap());
+    
         for thread in self.thread_list.drain(..) {
             thread.join().unwrap();
         }
