@@ -52,7 +52,8 @@ impl Balancer {
     /// forward a user request to a given server
     fn send_to(&self, server: Uuid, rq: Request) {
         // get the sender channel for the server
-        let sender = self.coordinator.lock().get_low_priority_sender(server);
+        let sender =
+            self.low_priority_sender_list.read()[self.map_id_index.read()[&server]].clone();
         // send the request
         let _ = sender.send(rq);
     }
