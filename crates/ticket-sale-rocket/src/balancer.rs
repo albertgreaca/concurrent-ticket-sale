@@ -106,8 +106,12 @@ impl RequestHandler for Balancer {
                     // request already has a server
                     Some(server) => {
                         // remove servers that terminated
-                        while let Ok(uuid) = self.terminated_receiver.try_recv() {
-                            self.map_id_index.write().remove(&uuid);
+                        if let Ok(uuid) = self.terminated_receiver.try_recv() {
+                            let mut map_id_index_guard = self.map_id_index.write();
+                            map_id_index_guard.remove(&uuid);
+                            while let Ok(uuid) = self.terminated_receiver.try_recv() {
+                                map_id_index_guard.remove(&uuid);
+                            }
                         }
                         // make sure assigned server still exists afterwards
                         if !self.map_id_index.read().contains_key(&server) {
@@ -127,7 +131,7 @@ impl RequestHandler for Balancer {
                         // assign a server and forward the request to the server
                         let mut rng = rand::thread_rng();
                         let server = self.server_id_list.read()
-                            [rng.gen_range(0..*self.no_active_servers.read()) as usize];
+                            [rng.gen_range(0..self.coordinator.lock().no_active_servers) as usize];
                         rq.set_server_id(server);
                         self.send_to(server, rq);
                     }
