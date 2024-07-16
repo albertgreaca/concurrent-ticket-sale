@@ -132,7 +132,7 @@ impl RequestHandler for Balancer {
                         // assign a server and forward the request to the server
                         let mut rng = rand::thread_rng();
                         let server = self.server_id_list.read()
-                            [rng.gen_range(0..self.coordinator.lock().no_active_servers) as usize];
+                            [rng.gen_range(0..*self.no_active_servers.read()) as usize];
                         rq.set_server_id(server);
                         self.send_to(server, rq);
                     }
