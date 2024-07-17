@@ -1,5 +1,6 @@
 //! Implementation of the server
 #![allow(clippy::too_many_arguments)]
+use std::cmp::min;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -58,7 +59,13 @@ impl Server {
         estimator_sender: Sender<u32>,
     ) -> Server {
         let id = Uuid::new_v4();
-        let num_tickets = (database.lock().get_num_available() as f64).sqrt() as u32;
+        let database_tickets = database.lock().get_num_available();
+
+        let num_tickets = min(
+            ((database_tickets as f64).sqrt() as u32) * 2,
+            database_tickets,
+        );
+
         let tickets = database.lock().allocate(num_tickets);
         Self {
             id,
@@ -351,7 +358,13 @@ impl Server {
             }
 
             // get tickets from database
-            let num_tickets = (database_guard.get_num_available() as f64).sqrt() as u32;
+            let database_tickets = database_guard.get_num_available();
+
+            let num_tickets = min(
+                ((database_tickets as f64).sqrt() as u32) * 2,
+                database_tickets,
+            );
+
             self.tickets.extend(database_guard.allocate(num_tickets));
         }
 
