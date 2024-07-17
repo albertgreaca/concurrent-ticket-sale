@@ -62,7 +62,7 @@ impl Server {
         let database_tickets = database.lock().get_num_available();
 
         let num_tickets = min(
-            ((database_tickets as f64).sqrt() as u32) * 2,
+            ((database_tickets as f64).sqrt() as u32) * 1,
             database_tickets,
         );
 
@@ -361,7 +361,7 @@ impl Server {
             let database_tickets = database_guard.get_num_available();
 
             let num_tickets = min(
-                ((database_tickets as f64).sqrt() as u32) * 2,
+                ((database_tickets as f64).sqrt() as u32) * 1,
                 database_tickets,
             );
 
