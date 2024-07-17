@@ -1,6 +1,7 @@
 //! Implementation of the server
 #![allow(clippy::too_many_arguments)]
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -32,6 +33,7 @@ pub struct Server {
 
     /// map from customer id to ticket id and time it was reserved
     reserved: HashMap<Uuid, (u32, Instant)>,
+    timeout_queue: VecDeque<(Uuid, Instant)>,
     timeout: u32,
 
     /// channels for receiving requests
@@ -68,6 +70,7 @@ impl Server {
             status: ServerStatus::Active,
             tickets,
             reserved: HashMap::new(),
+            timeout_queue: VecDeque::new(),
             timeout,
             low_priority: Some(low_priority),
             high_priority: Some(high_priority),
@@ -254,26 +257,32 @@ impl Server {
     pub fn remove_timeouted_reservations(&mut self) {
         let mut database_guard = self.database.lock();
 
-        // for all reservations
-        self.reserved.retain(|_, (ticket, time)| {
-            // if the reservation has timed out
-            if time.elapsed().as_secs() > self.timeout as u64 {
+        // while we have reservations
+        while !self.timeout_queue.is_empty() {
+            if self.timeout_queue.front().unwrap().1.elapsed().as_secs() <= self.timeout as u64 {
+                // no more timeouted reservations
+                break;
+            }
+            // get customer and time of reservation
+            let customer = self.timeout_queue.front().unwrap().0;
+            let time = self.timeout_queue.front().unwrap().1;
+            self.timeout_queue.pop_front();
+
+            // if reservation still exists
+            if self.reserved.contains_key(&customer) && self.reserved[&customer].1 == time {
+                let ticket = self.reserved[&customer].0;
                 // if the server is active
                 if self.status == ServerStatus::Active {
                     // return the ticket to the list
-                    self.tickets.push(*ticket);
+                    self.tickets.push(ticket);
                 } else {
                     // otherwise, return it to the database
-                    let x = *ticket;
-                    database_guard.deallocate(&[x]);
+                    database_guard.deallocate(&[ticket]);
                 }
-                // do not keep the reservation
-                false
-            } else {
-                // otherwise, keep the reservation
-                true
+                // remove reservation
+                self.reserved.remove(&customer);
             }
-        });
+        }
         drop(database_guard);
 
         // if no reservations are left and the server is terminating
@@ -352,7 +361,9 @@ impl Server {
 
         // reserve the last ticket
         let ticket = self.tickets.pop().unwrap();
-        self.reserved.insert(customer, (ticket, Instant::now()));
+        let time = Instant::now();
+        self.reserved.insert(customer, (ticket, time));
+        self.timeout_queue.push_back((customer, time));
         rq.respond_with_int(ticket);
     }
 
