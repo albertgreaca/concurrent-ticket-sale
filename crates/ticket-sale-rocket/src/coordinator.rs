@@ -39,8 +39,6 @@ pub struct Coordinator {
     terminated_sender: Sender<Uuid>,
     terminated_receiver: Receiver<Uuid>,
 
-    terminated_sender2: Sender<Uuid>,
-
     /// channel through which servers send their number of tickets to the estimator
     estimator_sender: Sender<u32>,
 }
@@ -51,7 +49,6 @@ impl Coordinator {
         reservation_timeout: u32,
         database: Arc<Mutex<Database>>,
         estimator_sender: Sender<u32>,
-        terminated_sender2: Sender<Uuid>,
     ) -> Self {
         let (terminated_sender, terminated_receiver) = unbounded();
         Self {
@@ -66,7 +63,6 @@ impl Coordinator {
             terminated_sender,
             terminated_receiver,
             estimator_sender,
-            terminated_sender2,
         }
     }
 
@@ -156,7 +152,6 @@ impl Coordinator {
                     low_priority_receiver,
                     high_priority_receiver,
                     self.terminated_sender.clone(),
-                    self.terminated_sender2.clone(),
                     self.estimator_sender.clone(),
                 );
                 let server_id = server.id;

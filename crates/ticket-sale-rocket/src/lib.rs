@@ -14,7 +14,6 @@ use std::thread;
 
 use crossbeam::channel::unbounded;
 use estimator::Estimator;
-use parking_lot::lock_api::RwLock;
 use parking_lot::Mutex;
 use ticket_sale_core::Config;
 
@@ -44,12 +43,10 @@ pub fn launch(config: &Config) -> Balancer {
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
     let (est_send, est_rec) = unbounded();
-    let (terminated_sender, terminated_receiver) = unbounded();
     let coordinator = Arc::new(Mutex::new(Coordinator::new(
         config.timeout,
         database.clone(),
         est_send,
-        terminated_sender,
     )));
     coordinator
         .lock()
@@ -68,18 +65,5 @@ pub fn launch(config: &Config) -> Balancer {
         estimator.run();
     });
 
-    let no_active_servers = coordinator.lock().no_active_servers;
-    let map_id_index = coordinator.lock().map_id_index.clone();
-    let server_id_list = coordinator.lock().server_id_list.clone();
-    let low_priority_sender_list = coordinator.lock().low_priority_sender_list.clone();
-    Balancer::new(
-        coordinator.clone(),
-        estimator_shutdown_sender,
-        other_thread,
-        RwLock::new(no_active_servers),
-        RwLock::new(map_id_index),
-        RwLock::new(server_id_list),
-        RwLock::new(low_priority_sender_list),
-        terminated_receiver,
-    )
+    Balancer::new(coordinator.clone(), estimator_shutdown_sender, other_thread)
 }

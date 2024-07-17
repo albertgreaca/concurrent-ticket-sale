@@ -42,7 +42,6 @@ pub struct Server {
 
     /// server sends its id through this channel once it terminated
     terminated_sender: Sender<Uuid>,
-    terminated_sender2: Sender<Uuid>,
     /// channel through which it sends its number of tickets to the estimator
     estimator_sender: Sender<u32>,
 }
@@ -56,7 +55,6 @@ impl Server {
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
         terminated_sender: Sender<Uuid>,
-        terminated_sender2: Sender<Uuid>,
         estimator_sender: Sender<u32>,
     ) -> Server {
         let id = Uuid::new_v4();
@@ -75,7 +73,6 @@ impl Server {
             low_priority: Some(low_priority),
             high_priority: Some(high_priority),
             terminated_sender,
-            terminated_sender2,
             estimator_sender,
         }
     }
@@ -135,7 +132,6 @@ impl Server {
 
                     // send the server id to signal that the server terminated
                     let _ = self.terminated_sender.send(self.id);
-                    let _ = self.terminated_sender2.send(self.id);
 
                     // terminate the server
                     break;
