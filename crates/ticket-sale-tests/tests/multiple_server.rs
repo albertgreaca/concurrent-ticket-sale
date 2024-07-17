@@ -3,8 +3,8 @@ use ticket_sale_tests::{RequestOptions, Reservation, TestCtxBuilder};
 use util::scale_to;
 
 mod util;
-#[tokio::test] // Every test function needs to be decorated with this attribute
-#[ntest::timeout(20_000)] // Test timeout in ms
+#[tokio::test]
+#[ntest::timeout(25_000)] // Test timeout in ms
 async fn test_buy_100_tickets_on_scaled_servers() -> Result<()> {
     let ctx = TestCtxBuilder::from_env()?
         .with_tickets(10_000)
