@@ -2,6 +2,8 @@
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
+use crossbeam::channel::Sender;
+use dashmap::DashMap;
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
@@ -18,6 +20,7 @@ pub struct Balancer {
     coordinator2_option: Option<Arc<Coordinator2>>,
     estimator_shutdown: mpsc::Sender<()>,
     estimator_thread: JoinHandle<()>,
+    server_sender: DashMap<Uuid, Sender<Request>>,
     bonus: bool,
 }
 
@@ -35,16 +38,22 @@ impl Balancer {
             coordinator2_option,
             estimator_shutdown,
             estimator_thread,
+            server_sender: DashMap::new(),
             bonus,
         }
     }
-    /// forward a user request to a given server
-    fn send_to(&self, server: Uuid, rq: Request) {
-        let coordinator = self.coordinator_option.clone().unwrap();
-        // get the sender channel for the server
-        let sender = coordinator.lock().get_low_priority_sender(server);
-        // send the request
-        let _ = sender.send(rq);
+    /// assign a server and forward the request to the server
+    fn get_server_sender(&self) -> (Uuid, Sender<Request>) {
+        let (server, sender) = self
+            .coordinator_option
+            .clone()
+            .unwrap()
+            .lock()
+            .get_random_server_sender();
+        if !self.server_sender.contains_key(&server) {
+            self.server_sender.insert(server, sender.clone());
+        }
+        (server, sender)
     }
 
     /// forward a user request to a given server
@@ -107,25 +116,29 @@ impl RequestHandler for Balancer {
                     match rq.server_id() {
                         // request already has a server
                         Some(server) => {
-                            // remove servers that terminated
-                            coordinator.lock().update_servers();
-                            // make sure assigned server still exists afterwards
-                            if !coordinator.lock().map_id_index.contains_key(&server) {
-                                // if not, assign a new server and respond with error
-                                let new_server = coordinator.lock().get_random_server();
-                                rq.set_server_id(new_server);
-                                rq.respond_with_err("Our error: Server no longer exists.");
+                            let sender = if self.server_sender.contains_key(&server) {
+                                self.server_sender.get(&server).unwrap().clone()
                             } else {
-                                // if yes, forward the request to the server
-                                self.send_to(server, rq);
+                                let aux = coordinator.lock().get_low_priority_sender(server);
+                                self.server_sender.insert(server, aux.clone());
+                                aux
+                            };
+                            let response = sender.send(rq);
+                            match response {
+                                Ok(_) => {}
+                                Err(senderr) => {
+                                    let mut rq = senderr.into_inner();
+                                    let (server, _) = self.get_server_sender();
+                                    rq.set_server_id(server);
+                                    rq.respond_with_err("Our error: Server no longer exists.")
+                                }
                             }
                         }
                         // request doesn't have a server
                         None => {
-                            // assign a server and forward the request to the server
-                            let server = coordinator.lock().get_random_server();
+                            let (server, sender) = self.get_server_sender();
                             rq.set_server_id(server);
-                            self.send_to(server, rq);
+                            let _ = sender.send(rq);
                         }
                     };
                 }

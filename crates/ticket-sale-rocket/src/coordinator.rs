@@ -77,9 +77,13 @@ impl Coordinator {
     }
 
     /// Get the id of a random non-terminating server
-    pub fn get_random_server(&self) -> Uuid {
+    pub fn get_random_server_sender(&self) -> (Uuid, Sender<Request>) {
         let mut rng = rand::thread_rng();
-        self.server_id_list[rng.gen_range(0..self.no_active_servers) as usize]
+        let index = rng.gen_range(0..self.no_active_servers) as usize;
+        (
+            self.server_id_list[index],
+            self.low_priority_sender_list[index].clone(),
+        )
     }
 
     /// Get the channel for sending user requests to the server with the given id
