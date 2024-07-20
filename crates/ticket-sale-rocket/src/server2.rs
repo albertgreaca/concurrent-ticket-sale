@@ -1,6 +1,6 @@
 //! Implementation of the server
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -20,6 +20,7 @@ pub struct Server2 {
     status: u32,
     tickets: Vec<u32>,
     reserved: HashMap<Uuid, (u32, Instant)>,
+    timeout_queue: VecDeque<(Uuid, Instant)>,
     timeout: u32,
 }
 
@@ -36,25 +37,14 @@ impl Server2 {
             status: 0,
             tickets,
             reserved: HashMap::new(),
+            timeout_queue: VecDeque::new(),
             timeout,
         }
     }
 
     /// Handle a [`Request`]
     pub fn handle_request(&mut self, mut rq: Request) {
-        self.reserved.retain(|_, (ticket, time)| {
-            if time.elapsed().as_secs() > self.timeout as u64 {
-                if self.status == 0 {
-                    self.tickets.push(*ticket);
-                } else {
-                    let x = *ticket;
-                    self.database.lock().deallocate(&[x]);
-                }
-                false
-            } else {
-                true
-            }
-        });
+        self.remove_timeouted_reservations();
         if self.reserved.is_empty() && self.status == 1 {
             self.database.lock().deallocate(self.tickets.as_slice());
             self.tickets.clear();
@@ -86,6 +76,9 @@ impl Server2 {
                 }
                 let ticket = self.tickets.pop().unwrap();
                 self.reserved.insert(bloke, (ticket, Instant::now()));
+                let time = Instant::now();
+
+                self.timeout_queue.push_back((rq.customer_id(), time));
                 rq.respond_with_int(ticket);
             }
             RequestKind::BuyTicket => {
@@ -148,19 +141,7 @@ impl Server2 {
     }
 
     pub fn send_tickets(&mut self, tickets: u32) -> u32 {
-        self.reserved.retain(|_, (ticket, time)| {
-            if time.elapsed().as_secs() > self.timeout as u64 {
-                if self.status == 0 {
-                    self.tickets.push(*ticket);
-                } else {
-                    let x = *ticket;
-                    self.database.lock().deallocate(&[x]);
-                }
-                false
-            } else {
-                true
-            }
-        });
+        self.remove_timeouted_reservations();
         self.estimate = tickets;
         self.tickets.len() as u32
     }
@@ -186,6 +167,44 @@ impl Server2 {
         self.database.lock().deallocate(self.tickets.as_slice());
         self.tickets.clear();
         if self.reserved.is_empty() {
+            self.status = 2;
+        }
+    }
+
+    pub fn remove_timeouted_reservations(&mut self) {
+        let mut database_guard = self.database.lock();
+
+        // while we have reservations
+        while !self.timeout_queue.is_empty() {
+            if self.timeout_queue.front().unwrap().1.elapsed().as_secs() <= self.timeout as u64 {
+                // no more timeouted reservations
+                break;
+            }
+            // get customer and time of reservation
+            let customer = self.timeout_queue.front().unwrap().0;
+            let time = self.timeout_queue.front().unwrap().1;
+            self.timeout_queue.pop_front();
+
+            // if reservation still exists
+            if self.reserved.contains_key(&customer) && self.reserved[&customer].1 == time {
+                let ticket = self.reserved[&customer].0;
+                // if the server is active
+                if self.status == 0 {
+                    // return the ticket to the list
+                    self.tickets.push(ticket);
+                } else {
+                    // otherwise, return it to the database
+                    database_guard.deallocate(&[ticket]);
+                }
+                // remove reservation
+                self.reserved.remove(&customer);
+            }
+        }
+        drop(database_guard);
+
+        // if no reservations are left and the server is terminating
+        if self.reserved.is_empty() && self.status == 1 {
+            // mark server as terminated
             self.status = 2;
         }
     }
