@@ -43,26 +43,33 @@ use database::Database;
 pub fn launch(config: &Config) -> Balancer {
     if !config.bonus {
         let database = Arc::new(Mutex::new(Database::new(config.tickets)));
-        let coordinator = Arc::new(Coordinator2::new(config.timeout, database.clone()));
-        coordinator.scale_to(config.initial_servers);
-        let estimator = Arc::new(Mutex::new(Estimator2::new(
+
+        let (est_send, est_rec) = unbounded();
+        let coordinator = Arc::new(Coordinator2::new(
+            config.timeout,
+            database.clone(),
+            est_send,
+        ));
+        coordinator.scale_to(config.initial_servers, coordinator.clone());
+
+        let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
+
+        let mut estimator = Estimator2::new(
             database.clone(),
             coordinator.clone(),
             config.estimator_roundtrip_time,
-        )));
-        let estimator2 = estimator.clone();
+            est_rec,
+            estimator_shutdown_receiver,
+        );
         let other_thread = thread::spawn(move || {
-            while Arc::strong_count(&estimator2) > 1 {
-                estimator2.lock().run();
-            }
+            estimator.run();
         });
-        let (a, _) = mpsc::channel();
+
         return Balancer::new(
             None,
             Some(coordinator),
-            a,
+            estimator_shutdown_sender,
             other_thread,
-            Some(estimator),
             false,
         );
     }
@@ -97,7 +104,6 @@ pub fn launch(config: &Config) -> Balancer {
         None,
         estimator_shutdown_sender,
         other_thread,
-        None,
         true,
     )
 }
