@@ -37,7 +37,7 @@ use database::Database;
 /// :warning: This functions must not be renamed and its signature must not be changed.
 pub fn launch(config: &Config) -> Balancer {
     if config.bonus {
-        todo!("Bonus not implemented!")
+        //todo!("Bonus not implemented!")
     }
 
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
