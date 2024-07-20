@@ -76,7 +76,7 @@ impl RequestHandler for Balancer {
     // docstrings of `handle()` and `shutdown()`.
 
     fn handle(&self, mut rq: Request) {
-        if self.bonus {
+        if !self.bonus {
             match rq.kind() {
                 RequestKind::GetNumServers => {
                     // get the number of servers with status 0
@@ -224,7 +224,7 @@ impl RequestHandler for Balancer {
     }
 
     fn shutdown(self) {
-        if self.bonus {
+        if !self.bonus {
             // tell the estimator to shut down
             let _ = self.estimator_shutdown.send(());
             self.estimator_thread.join().unwrap();
