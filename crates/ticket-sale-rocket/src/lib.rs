@@ -41,7 +41,7 @@ use database::Database;
 ///
 /// :warning: This functions must not be renamed and its signature must not be changed.
 pub fn launch(config: &Config) -> Balancer {
-    if !config.bonus {
+    if config.bonus {
         let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
         let (est_send, est_rec) = unbounded();
@@ -70,7 +70,7 @@ pub fn launch(config: &Config) -> Balancer {
             Some(coordinator),
             estimator_shutdown_sender,
             other_thread,
-            false,
+            true,
         );
     }
 
@@ -104,6 +104,6 @@ pub fn launch(config: &Config) -> Balancer {
         None,
         estimator_shutdown_sender,
         other_thread,
-        true,
+        false,
     )
 }
