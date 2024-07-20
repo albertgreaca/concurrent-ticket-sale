@@ -45,14 +45,12 @@ pub fn launch(config: &Config) -> Balancer {
         let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
         let (est_send, est_rec) = unbounded();
-        let coordinator = Arc::new(Mutex::new(Coordinator2::new(
+        let coordinator = Arc::new(Coordinator2::new(
             config.timeout,
             database.clone(),
             est_send,
-        )));
-        coordinator
-            .lock()
-            .scale_to(config.initial_servers, coordinator.clone());
+        ));
+        coordinator.scale_to(config.initial_servers, coordinator.clone());
 
         let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
 
