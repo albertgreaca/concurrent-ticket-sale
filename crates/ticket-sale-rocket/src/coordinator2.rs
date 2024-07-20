@@ -5,7 +5,6 @@ use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
 use parking_lot::Mutex;
-use rand::Rng;
 use ticket_sale_core::Request;
 use uuid::Uuid;
 
@@ -24,6 +23,7 @@ pub struct Coordinator2 {
 
     /// number of non-terminating servers
     pub no_active_servers: u32,
+    pub curr_server: u32,
 
     /// map between the id of a server and its index in the lists
     pub map_id_index: HashMap<Uuid, usize>,
@@ -55,6 +55,7 @@ impl Coordinator2 {
             reservation_timeout,
             database,
             no_active_servers: 0,
+            curr_server: 0,
             map_id_index: HashMap::new(),
             server_id_list: Vec::new(),
             low_priority_sender_list: Vec::new(),
@@ -77,12 +78,15 @@ impl Coordinator2 {
     }
 
     /// Get the id of a random non-terminating server
-    pub fn get_random_server_sender(&self) -> (Uuid, Sender<Request>) {
-        let mut rng = rand::thread_rng();
-        let index = rng.gen_range(0..self.no_active_servers) as usize;
+    pub fn get_random_server_sender(&mut self) -> (Uuid, Sender<Request>) {
+        if self.curr_server >= self.no_active_servers {
+            self.curr_server = 0;
+        }
+        let index = self.curr_server;
+        self.curr_server += 1;
         (
-            self.server_id_list[index],
-            self.low_priority_sender_list[index].clone(),
+            self.server_id_list[index as usize],
+            self.low_priority_sender_list[index as usize].clone(),
         )
     }
 

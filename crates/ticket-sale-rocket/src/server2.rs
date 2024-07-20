@@ -127,7 +127,7 @@ impl Server2 {
                     // assign a new server to all low priority requests
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
-                        let coordinator_guard = self.coordinator.lock();
+                        let mut coordinator_guard = self.coordinator.lock();
                         let (x, _) = coordinator_guard.get_random_server_sender();
                         rq.set_server_id(x);
                         rq.respond_with_err("Our error: Server no longer exists.");
@@ -341,7 +341,7 @@ impl Server2 {
         // if the server is terminating
         if self.status == ServerStatus::Terminating {
             // assign a new server and respond with error
-            let coordinator_guard = self.coordinator.lock();
+            let mut coordinator_guard = self.coordinator.lock();
             let (x, _) = coordinator_guard.get_random_server_sender();
             rq.set_server_id(x);
             rq.respond_with_err("Our error: Ticket reservations no longer allowed on this server");
