@@ -75,10 +75,9 @@ impl Server2 {
                         .extend(self.database.lock().allocate(num_tickets));
                 }
                 let ticket = self.tickets.pop().unwrap();
-                self.reserved.insert(bloke, (ticket, Instant::now()));
                 let time = Instant::now();
-
-                self.timeout_queue.push_back((rq.customer_id(), time));
+                self.timeout_queue.push_back((bloke, time));
+                self.reserved.insert(bloke, (ticket, time));
                 rq.respond_with_int(ticket);
             }
             RequestKind::BuyTicket => {
