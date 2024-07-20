@@ -17,7 +17,7 @@ use super::coordinator2::Coordinator2;
 /// `ticket_sale_rocket::Balancer`).
 pub struct Balancer {
     coordinator_option: Option<Arc<Mutex<Coordinator>>>,
-    coordinator2_option: Option<Arc<Coordinator2>>,
+    coordinator2_option: Option<Arc<Mutex<Coordinator2>>>,
     estimator_shutdown: mpsc::Sender<()>,
     estimator_thread: JoinHandle<()>,
     server_sender: DashMap<Uuid, Sender<Request>>,
@@ -28,7 +28,7 @@ impl Balancer {
     /// Create a new [`Balancer`]
     pub fn new(
         coordinator_option: Option<Arc<Mutex<Coordinator>>>,
-        coordinator2_option: Option<Arc<Coordinator2>>,
+        coordinator2_option: Option<Arc<Mutex<Coordinator2>>>,
         estimator_shutdown: mpsc::Sender<()>,
         estimator_thread: JoinHandle<()>,
         bonus: bool,
@@ -56,13 +56,18 @@ impl Balancer {
         (server, sender)
     }
 
-    /// forward a user request to a given server
-    fn send_to2(&self, server: Uuid, rq: Request) {
-        let coordinator2 = self.coordinator2_option.clone().unwrap();
-        // get the sender channel for the server
-        let sender = coordinator2.get_low_priority_sender(server);
-        // send the request
-        let _ = sender.send(rq);
+    /// assign a server and forward the request to the server
+    fn get_server_sender2(&self) -> (Uuid, Sender<Request>) {
+        let (server, sender) = self
+            .coordinator2_option
+            .clone()
+            .unwrap()
+            .lock()
+            .get_random_server_sender();
+        if !self.server_sender.contains_key(&server) {
+            self.server_sender.insert(server, sender.clone());
+        }
+        (server, sender)
     }
 }
 
@@ -71,7 +76,7 @@ impl RequestHandler for Balancer {
     // docstrings of `handle()` and `shutdown()`.
 
     fn handle(&self, mut rq: Request) {
-        if !self.bonus {
+        if self.bonus {
             match rq.kind() {
                 RequestKind::GetNumServers => {
                     // get the number of servers with status 0
@@ -151,6 +156,7 @@ impl RequestHandler for Balancer {
                         self.coordinator2_option
                             .clone()
                             .unwrap()
+                            .lock()
                             .get_num_active_servers(),
                     );
                 }
@@ -160,8 +166,8 @@ impl RequestHandler for Balancer {
                         self.coordinator2_option
                             .clone()
                             .unwrap()
-                            .get_active_servers()
-                            .as_slice(),
+                            .lock()
+                            .get_active_servers(),
                     );
                 }
                 RequestKind::SetNumServers => {
@@ -169,7 +175,7 @@ impl RequestHandler for Balancer {
                     match rq.read_u32() {
                         Some(n) => {
                             // set number of servers with status 0 to n
-                            coordinator2.scale_to(n, coordinator2.clone());
+                            coordinator2.lock().scale_to(n, coordinator2.clone());
                             rq.respond_with_int(n);
                         }
                         None => {
@@ -187,25 +193,29 @@ impl RequestHandler for Balancer {
                     match rq.server_id() {
                         // request already has a server
                         Some(server) => {
-                            // remove servers that terminated
-                            coordinator2.update_servers();
-                            // make sure assigned server still exists afterwards
-                            if !coordinator2.map_id_index.lock().contains_key(&server) {
-                                // if not, assign a new server and respond with error
-                                let new_server = coordinator2.get_random_server();
-                                rq.set_server_id(new_server);
-                                rq.respond_with_err("Our error: Server no longer exists.");
+                            let sender = if self.server_sender.contains_key(&server) {
+                                self.server_sender.get(&server).unwrap().clone()
                             } else {
-                                // if yes, forward the request to the server
-                                self.send_to2(server, rq);
+                                let aux = coordinator2.lock().get_low_priority_sender(server);
+                                self.server_sender.insert(server, aux.clone());
+                                aux
+                            };
+                            let response = sender.send(rq);
+                            match response {
+                                Ok(_) => {}
+                                Err(senderr) => {
+                                    let mut rq = senderr.into_inner();
+                                    let (server, _) = self.get_server_sender2();
+                                    rq.set_server_id(server);
+                                    rq.respond_with_err("Our error: Server no longer exists.")
+                                }
                             }
                         }
                         // request doesn't have a server
                         None => {
-                            // assign a server and forward the request to the server
-                            let server = coordinator2.get_random_server();
+                            let (server, sender) = self.get_server_sender2();
                             rq.set_server_id(server);
-                            self.send_to2(server, rq);
+                            let _ = sender.send(rq);
                         }
                     };
                 }
@@ -214,7 +224,7 @@ impl RequestHandler for Balancer {
     }
 
     fn shutdown(self) {
-        if !self.bonus {
+        if self.bonus {
             // tell the estimator to shut down
             let _ = self.estimator_shutdown.send(());
             self.estimator_thread.join().unwrap();
@@ -225,7 +235,7 @@ impl RequestHandler for Balancer {
             let _ = self.estimator_shutdown.send(());
             self.estimator_thread.join().unwrap();
             // tell servers to shut down
-            self.coordinator2_option.clone().unwrap().shutdown();
+            self.coordinator2_option.clone().unwrap().lock().shutdown();
         }
     }
 }

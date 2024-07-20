@@ -41,16 +41,18 @@ use database::Database;
 ///
 /// :warning: This functions must not be renamed and its signature must not be changed.
 pub fn launch(config: &Config) -> Balancer {
-    if config.bonus {
+    if !config.bonus {
         let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
         let (est_send, est_rec) = unbounded();
-        let coordinator = Arc::new(Coordinator2::new(
+        let coordinator = Arc::new(Mutex::new(Coordinator2::new(
             config.timeout,
             database.clone(),
             est_send,
-        ));
-        coordinator.scale_to(config.initial_servers, coordinator.clone());
+        )));
+        coordinator
+            .lock()
+            .scale_to(config.initial_servers, coordinator.clone());
 
         let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
 
@@ -70,7 +72,7 @@ pub fn launch(config: &Config) -> Balancer {
             Some(coordinator),
             estimator_shutdown_sender,
             other_thread,
-            true,
+            false,
         );
     }
 
@@ -104,6 +106,6 @@ pub fn launch(config: &Config) -> Balancer {
         None,
         estimator_shutdown_sender,
         other_thread,
-        false,
+        true,
     )
 }

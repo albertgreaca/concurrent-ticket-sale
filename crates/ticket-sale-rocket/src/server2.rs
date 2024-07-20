@@ -24,7 +24,7 @@ pub struct Server2 {
     estimate: u32,
     /// The database
     database: Arc<Mutex<Database>>,
-    coordinator: Arc<Coordinator2>,
+    coordinator: Arc<Mutex<Coordinator2>>,
 
     /// current server status
     status: ServerStatus,
@@ -51,7 +51,7 @@ impl Server2 {
     /// Create a new [`Server`]
     pub fn new(
         database: Arc<Mutex<Database>>,
-        coordinator: Arc<Coordinator2>,
+        coordinator: Arc<Mutex<Coordinator2>>,
         timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
@@ -127,7 +127,8 @@ impl Server2 {
                     // assign a new server to all low priority requests
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
-                        let x = self.coordinator.get_random_server();
+                        let coordinator_guard = self.coordinator.lock();
+                        let (x, _) = coordinator_guard.get_random_server_sender();
                         rq.set_server_id(x);
                         rq.respond_with_err("Our error: Server no longer exists.");
                     }
@@ -340,7 +341,8 @@ impl Server2 {
         // if the server is terminating
         if self.status == ServerStatus::Terminating {
             // assign a new server and respond with error
-            let x = self.coordinator.get_random_server();
+            let coordinator_guard = self.coordinator.lock();
+            let (x, _) = coordinator_guard.get_random_server_sender();
             rq.set_server_id(x);
             rq.respond_with_err("Our error: Ticket reservations no longer allowed on this server");
             return;
