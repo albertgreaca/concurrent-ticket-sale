@@ -12,16 +12,21 @@
 use std::sync::{mpsc, Arc};
 use std::thread;
 
+use coordinator2::Coordinator2;
 use crossbeam::channel::unbounded;
 use estimator::Estimator;
+use estimator2::Estimator2;
 use parking_lot::Mutex;
 use ticket_sale_core::Config;
 
 mod balancer;
 mod coordinator;
+mod coordinator2;
 mod database;
 mod estimator;
+mod estimator2;
 mod server;
+mod server2;
 mod serverrequest;
 mod serverstatus;
 
@@ -36,8 +41,30 @@ use database::Database;
 ///
 /// :warning: This functions must not be renamed and its signature must not be changed.
 pub fn launch(config: &Config) -> Balancer {
-    if config.bonus {
-        //todo!("Bonus not implemented!")
+    if !config.bonus {
+        let database = Arc::new(Mutex::new(Database::new(config.tickets)));
+        let coordinator = Arc::new(Coordinator2::new(config.timeout, database.clone()));
+        coordinator.scale_to(config.initial_servers);
+        let estimator = Arc::new(Mutex::new(Estimator2::new(
+            database.clone(),
+            coordinator.clone(),
+            config.estimator_roundtrip_time,
+        )));
+        let estimator2 = estimator.clone();
+        let other_thread = thread::spawn(move || {
+            while Arc::strong_count(&estimator2) > 1 {
+                estimator2.lock().run();
+            }
+        });
+        let (a, _) = mpsc::channel();
+        return Balancer::new(
+            None,
+            Some(coordinator),
+            a,
+            other_thread,
+            Some(estimator),
+            false,
+        );
     }
 
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
@@ -65,5 +92,12 @@ pub fn launch(config: &Config) -> Balancer {
         estimator.run();
     });
 
-    Balancer::new(coordinator.clone(), estimator_shutdown_sender, other_thread)
+    Balancer::new(
+        Some(coordinator),
+        None,
+        estimator_shutdown_sender,
+        other_thread,
+        None,
+        true,
+    )
 }
