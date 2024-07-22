@@ -6,7 +6,7 @@ team-name = "👀 Manchmal ist das Leben halt so..."
 language = "rust"
 
 # Whether you implemented the bonus
-bonus-implemented = true
+bonus-implemented = false
 
 # Instruct the testing framework to test your bonus implementation. This is
 # only relevant for testing locally. In Mission Control, we will test both the
