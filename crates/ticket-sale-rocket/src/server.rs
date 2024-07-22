@@ -15,6 +15,7 @@ use uuid::Uuid;
 use super::database::Database;
 use super::serverrequest::HighPriorityServerRequest;
 use crate::coordinator::Coordinator;
+use crate::serverstatus::EstimatorServerStatus;
 use crate::serverstatus::ServerStatus;
 
 /// A server in the ticket sales system
@@ -45,6 +46,7 @@ pub struct Server {
     terminated_sender: Sender<Uuid>,
     /// channel through which it sends its number of tickets to the estimator
     estimator_sender: Sender<u32>,
+    scaling_sender: Sender<EstimatorServerStatus>,
 }
 
 impl Server {
@@ -57,6 +59,7 @@ impl Server {
         high_priority: Receiver<HighPriorityServerRequest>,
         terminated_sender: Sender<Uuid>,
         estimator_sender: Sender<u32>,
+        scaling_sender: Sender<EstimatorServerStatus>,
     ) -> Server {
         let id = Uuid::new_v4();
         let database_tickets = database.lock().get_num_available();
@@ -81,6 +84,7 @@ impl Server {
             high_priority: Some(high_priority),
             terminated_sender,
             estimator_sender,
+            scaling_sender,
         }
     }
 
@@ -119,6 +123,9 @@ impl Server {
 
                 // if the server is still terminated
                 if self.status == ServerStatus::Terminated {
+                    let _ = self
+                        .scaling_sender
+                        .send(EstimatorServerStatus::Deactivated { server: self.id });
                     // drop the high priority receiver to prevent
                     // further requests from being sent
                     let high_priority_channel = self.high_priority.take().unwrap();

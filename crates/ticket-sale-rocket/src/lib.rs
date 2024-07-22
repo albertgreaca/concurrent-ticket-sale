@@ -77,27 +77,29 @@ pub fn launch(config: &Config) -> Balancer {
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
     let (est_send, est_rec) = unbounded();
+    let (scaling_send, scaling_rec) = unbounded();
     let coordinator = Arc::new(Mutex::new(Coordinator::new(
         config.timeout,
         database.clone(),
         est_send,
+        scaling_send,
     )));
-    coordinator
-        .lock()
-        .scale_to(config.initial_servers, coordinator.clone());
-
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
 
     let mut estimator = Estimator::new(
         database.clone(),
-        coordinator.clone(),
         config.estimator_roundtrip_time,
         est_rec,
+        scaling_rec,
         estimator_shutdown_receiver,
     );
     let other_thread = thread::spawn(move || {
         estimator.run();
     });
+
+    coordinator
+        .lock()
+        .scale_to(config.initial_servers, coordinator.clone());
 
     Balancer::new(
         Some(coordinator),
