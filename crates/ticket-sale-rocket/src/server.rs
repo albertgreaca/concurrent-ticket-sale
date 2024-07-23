@@ -62,21 +62,13 @@ impl Server {
         scaling_sender: Sender<EstimatorServerStatus>,
     ) -> Server {
         let id = Uuid::new_v4();
-        let database_tickets = database.lock().get_num_available();
-
-        let num_tickets = min(
-            ((database_tickets as f64).sqrt() as u32) * 2,
-            database_tickets,
-        );
-
-        let tickets = database.lock().allocate(num_tickets);
         Self {
             id,
             estimate: 0,
             database,
             coordinator,
             status: ServerStatus::Active,
-            tickets,
+            tickets: Vec::new(),
             reserved: HashMap::new(),
             timeout_queue: VecDeque::new(),
             timeout,
