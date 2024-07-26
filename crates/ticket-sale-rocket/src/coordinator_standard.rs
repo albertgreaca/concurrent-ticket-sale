@@ -5,7 +5,7 @@ use std::sync::mpsc::channel;
 use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::channel::{unbounded, Sender};
 use parking_lot::Mutex;
 use rand::Rng;
 use ticket_sale_core::Request;

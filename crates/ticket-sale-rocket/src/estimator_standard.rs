@@ -3,7 +3,7 @@
 use std::sync::{mpsc, Arc};
 use std::{collections::HashMap, time::Duration};
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::Sender;
 use parking_lot::Mutex;
 use uuid::Uuid;
 

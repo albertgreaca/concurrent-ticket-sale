@@ -20,3 +20,8 @@ pub enum EstimatorServerStatus {
         server: Uuid,
     },
 }
+
+pub enum UserSessionStatus {
+    Activated { user: Uuid },
+    Deactivated { user: Uuid },
+}

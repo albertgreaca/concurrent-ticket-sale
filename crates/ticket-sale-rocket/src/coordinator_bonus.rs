@@ -14,6 +14,7 @@ use super::database::Database;
 use super::server_bonus::ServerBonus;
 use super::serverrequest::HighPriorityServerRequest;
 use super::serverstatus::EstimatorServerStatus;
+use crate::serverstatus::UserSessionStatus;
 /// Coordinator orchestrating all the components of the system
 pub struct CoordinatorBonus {
     database: Arc<Mutex<Database>>,
@@ -44,7 +45,7 @@ pub struct CoordinatorBonus {
     /// Sender for servers to notify the estimator of their activation/termination
     estimator_scaling_sender: Sender<EstimatorServerStatus>,
 
-    user_session_finished_send: Sender<Uuid>,
+    user_session_sender: Sender<UserSessionStatus>,
 }
 
 impl CoordinatorBonus {
@@ -54,7 +55,7 @@ impl CoordinatorBonus {
         reservation_timeout: u32,
         estimator_tickets_sender: Sender<u32>,
         estimator_scaling_sender: Sender<EstimatorServerStatus>,
-        user_session_finished_send: Sender<Uuid>
+        user_session_sender: Sender<UserSessionStatus>,
     ) -> Self {
         let (coordinator_terminated_sender, coordinator_terminated_receiver) = unbounded();
         Self {
@@ -70,7 +71,7 @@ impl CoordinatorBonus {
             coordinator_terminated_receiver,
             estimator_tickets_sender,
             estimator_scaling_sender,
-            user_session_finished_send
+            user_session_sender,
         }
     }
 
@@ -176,7 +177,7 @@ impl CoordinatorBonus {
                     self.coordinator_terminated_sender.clone(),
                     self.estimator_tickets_sender.clone(),
                     self.estimator_scaling_sender.clone(),
-                    self.user_session_finished_send.clone()
+                    self.user_session_sender.clone(),
                 );
                 let server_id = server.id;
 

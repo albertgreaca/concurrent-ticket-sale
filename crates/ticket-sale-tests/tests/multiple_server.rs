@@ -1,5 +1,5 @@
 use eyre::Result;
-use ticket_sale_tests::{RequestOptions, Reservation, TestCtxBuilder};
+use ticket_sale_tests::{Reservation, TestCtxBuilder};
 use util::scale_to;
 
 mod util;

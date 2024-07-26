@@ -1,18 +1,17 @@
 //! Implementation of the bonus balancer
 
 use std::collections::HashSet;
-use std::sync::mpsc::Receiver;
 use std::sync::{mpsc, Arc};
-use crossbeam::channel::Receiver as crossbeam_recv;
 use std::thread::JoinHandle;
 
-use crossbeam::channel::Sender;
+use crossbeam::channel::{Receiver, Sender};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
 use super::coordinator_bonus::CoordinatorBonus;
+use crate::serverstatus::UserSessionStatus;
 
 pub struct BalancerBonus {
     coordinator: Arc<Mutex<CoordinatorBonus>>,
@@ -25,10 +24,9 @@ pub struct BalancerBonus {
 
     // Maps from server id to its low priority sender
     server_sender: DashMap<Uuid, Sender<Request>>,
-    
-    active_user_sessions: Mutex<HashSet<Uuid>>,
-    user_session_finished_recv: crossbeam_recv<Uuid>,
 
+    active_user_sessions: Mutex<HashSet<Uuid>>,
+    user_session_receiver: Receiver<UserSessionStatus>,
 }
 
 impl BalancerBonus {
@@ -37,7 +35,7 @@ impl BalancerBonus {
         coordinator: Arc<Mutex<CoordinatorBonus>>,
         estimator_shutdown_sender: mpsc::Sender<()>,
         estimator_thread: JoinHandle<()>,
-        user_session_finished_recv: crossbeam_recv<Uuid>
+        user_session_receiver: Receiver<UserSessionStatus>,
     ) -> Self {
         Self {
             coordinator,
@@ -45,7 +43,7 @@ impl BalancerBonus {
             estimator_thread,
             server_sender: DashMap::new(),
             active_user_sessions: Mutex::new(HashSet::new()),
-            user_session_finished_recv,
+            user_session_receiver,
         }
     }
 
@@ -61,11 +59,19 @@ impl BalancerBonus {
 
         (server, sender)
     }
+
     fn update_active_user_sessions(&self) {
         loop {
-            match self.user_session_finished_recv.try_recv() {
-                Ok(user_id) => {
-                    self.active_user_sessions.lock().remove(&user_id);
+            match self.user_session_receiver.try_recv() {
+                Ok(user_session_status) => {
+                    match user_session_status {
+                        UserSessionStatus::Activated { user } => {
+                            self.active_user_sessions.lock().insert(user);
+                        }
+                        UserSessionStatus::Deactivated { user } => {
+                            self.active_user_sessions.lock().remove(&user);
+                        }
+                    }
                 }
                 Err(_) => {
                     break;
@@ -107,52 +113,55 @@ impl RequestHandler for BalancerBonus {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                let cust = rq.customer_id();
                 self.update_active_user_sessions();
-                if self.active_user_sessions.lock().contains(&cust) {
+
+                let customer = rq.customer_id();
+                if self.active_user_sessions.lock().contains(&customer) {
                     match rq.server_id() {
+                        // Request already has a server
                         Some(server) => {
-                                // Get the low priority sender for this server
-                        let sender = if self.server_sender.contains_key(&server) {
-                            // If it is in the map, get it from there
-                            self.server_sender.get(&server).unwrap().clone()
-                        } else {
-                            // Otherwise, get it from the coordinator
-                            let aux = self.coordinator.lock().get_low_priority_sender(server);
-                            // And insert it in the map
-                            self.server_sender.insert(server, aux.clone());
-                            aux
-                        };
-                        // Attempt to forward the request
-                        let response = sender.send(rq);
-                       
-                        match response {
-                            Ok(_) => {}
-                            Err(senderr) => {
-                                // Not forwarded => server terminated => assign new server
-                                let mut rq = senderr.into_inner();
-                                let (server, _) = self.get_server_sender();
-                                rq.set_server_id(server);
-                                rq.respond_with_err("Our error: Server no longer exists.")
+                            // Get the low priority sender for this server
+                            let sender = if self.server_sender.contains_key(&server) {
+                                // If it is in the map, get it from there
+                                self.server_sender.get(&server).unwrap().clone()
+                            } else {
+                                // Otherwise, get it from the coordinator
+                                let aux = self.coordinator.lock().get_low_priority_sender(server);
+                                // And insert it in the map
+                                self.server_sender.insert(server, aux.clone());
+                                aux
+                            };
+                            // Attempt to forward the request
+                            let response = sender.send(rq);
+
+                            match response {
+                                Ok(_) => {}
+                                Err(senderr) => {
+                                    // Not forwarded => server terminated => assign new server
+                                    let mut rq = senderr.into_inner();
+                                    let (server, _) = self.get_server_sender();
+                                    rq.set_server_id(server);
+                                    rq.respond_with_err("Our error: Server no longer exists.")
+                                }
                             }
                         }
-
+                        // Request doesn't have a server
+                        None => {
+                            // Assign a server and forward the request to the server
+                            let (server, sender) = self.get_server_sender();
+                            rq.set_server_id(server);
+                            let _ = sender.send(rq);
+                        }
                     }
-
-                    None => {
-                        panic!("User Session is on server, but request has no server id! Should never happen.")
-                    }
+                } else {
+                    // Assign a new server and forward the request to the server
+                    let (server, sender) = self.get_server_sender();
+                    rq.set_server_id(server);
+                    let _ = sender.send(rq);
                 }
-            } else {
-                let (server, sender) = self.get_server_sender();
-                self.active_user_sessions.lock().insert(cust);
-                rq.set_server_id(server);
-                let _ = sender.send(rq);
-            }
             }
         }
     }
-  
 
     fn shutdown(self) {
         // Tell the estimator to shut down

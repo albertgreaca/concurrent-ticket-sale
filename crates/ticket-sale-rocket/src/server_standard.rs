@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::Receiver;
 use crossbeam::select;
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestKind};

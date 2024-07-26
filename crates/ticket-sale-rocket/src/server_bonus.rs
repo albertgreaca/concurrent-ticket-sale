@@ -17,6 +17,7 @@ use super::database::Database;
 use super::serverrequest::HighPriorityServerRequest;
 use super::serverstatus::EstimatorServerStatus;
 use super::serverstatus::ServerStatus;
+use crate::serverstatus::UserSessionStatus;
 
 pub struct ServerBonus {
     /// The server's ID
@@ -56,8 +57,7 @@ pub struct ServerBonus {
     /// Sender for notifying the estimator of the server's termination
     estimator_scaling_sender: Sender<EstimatorServerStatus>,
 
-    user_session_finished_send: Sender<Uuid>
-
+    user_session_sender: Sender<UserSessionStatus>,
 }
 
 impl ServerBonus {
@@ -71,8 +71,7 @@ impl ServerBonus {
         coordinator_terminated_sender: Sender<Uuid>,
         estimator_tickets_sender: Sender<u32>,
         estimator_scaling_sender: Sender<EstimatorServerStatus>,
-        user_session_finished_send: Sender<Uuid>
-
+        user_session_sender: Sender<UserSessionStatus>,
     ) -> Self {
         let id = Uuid::new_v4();
         Self {
@@ -90,9 +89,8 @@ impl ServerBonus {
             coordinator_terminated_sender,
             estimator_tickets_sender,
             estimator_scaling_sender,
-            user_session_finished_send
+            user_session_sender,
         }
-    
     }
 
     /// Get the receiver for low priority requests
@@ -304,8 +302,11 @@ impl ServerBonus {
                 }
                 // Remove reservation
                 self.reserved.remove(&customer);
-                // send to channel User with finished session
-                let _ = self.user_session_finished_send.send(customer);
+
+                // Notify the balancer of the finished user session
+                let _ = self
+                    .user_session_sender
+                    .send(UserSessionStatus::Deactivated { user: customer });
             }
         }
         drop(database_guard);
@@ -401,6 +402,12 @@ impl ServerBonus {
         let time = Instant::now();
         self.reserved.insert(customer, (ticket, time));
         self.timeout_queue.push_back((customer, time));
+
+        // Notify the balancer of the started user session
+        let _ = self
+            .user_session_sender
+            .send(UserSessionStatus::Activated { user: customer });
+
         rq.respond_with_int(ticket);
     }
 
@@ -421,11 +428,17 @@ impl ServerBonus {
                 if self.reserved[&customer].0 == ticket {
                     // Remove the reservation
                     self.reserved.remove(&customer);
+
                     // Terminate server if this was the last reservation and server was terminating
                     if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
                         self.status = ServerStatus::Terminated;
                     }
-                    let _ = self.user_session_finished_send.send(customer);
+
+                    // Notify the balancer of the finished user session
+                    let _ = self
+                        .user_session_sender
+                        .send(UserSessionStatus::Deactivated { user: customer });
+
                     rq.respond_with_int(ticket);
                 } else {
                     rq.respond_with_err(
@@ -467,7 +480,12 @@ impl ServerBonus {
                     if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
                         self.status = ServerStatus::Terminated;
                     }
-                    let _ = self.user_session_finished_send.send(customer);
+
+                    // Notify the balancer of the finished user session
+                    let _ = self
+                        .user_session_sender
+                        .send(UserSessionStatus::Deactivated { user: customer });
+
                     rq.respond_with_int(ticket);
                 } else {
                     rq.respond_with_err(
