@@ -407,24 +407,29 @@ impl ServerStandard {
             let ticket = ticket_option.unwrap();
             let customer = rq.customer_id();
 
-            // Make sure the customer has a reservation
-            if self.reserved.contains_key(&customer) {
-                // And that it reserved that specific ticket
-                if self.reserved[&customer].0 == ticket {
-                    // Remove the reservation
-                    self.reserved.remove(&customer);
-                    // Terminate server if this was the last reservation and server was terminating
-                    if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
-                        self.status = ServerStatus::Terminated;
+            // Attempt to remove a reservation for this customer
+            let reservation = self.reserved.remove(&customer);
+
+            match reservation {
+                // Make sure the customer has a reservation
+                Some((reservation_ticket, time)) => {
+                    // And that it reserved that specific ticket
+                    if reservation_ticket == ticket {
+                        // Terminate server if this was the last reservation and server was
+                        // terminating
+                        if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
+                            self.status = ServerStatus::Terminated;
+                        }
+                        rq.respond_with_int(ticket);
+                    } else {
+                        // Insert the reservation back so it can still be bought later
+                        self.reserved.insert(customer, (reservation_ticket, time));
+                        rq.respond_with_err(
+                            "Our error: Reservation not made for that ticket for buy request.",
+                        )
                     }
-                    rq.respond_with_int(ticket);
-                } else {
-                    rq.respond_with_err(
-                        "Our error: Reservation not made for that ticket for buy request.",
-                    )
                 }
-            } else {
-                rq.respond_with_err("Our error: No reservation for buy request.")
+                None => rq.respond_with_err("Our error: No reservation for buy request."),
             }
         }
     }
@@ -440,32 +445,36 @@ impl ServerStandard {
             let ticket = ticket_option.unwrap();
             let customer = rq.customer_id();
 
-            // Make sure the customer has a reservation
-            if self.reserved.contains_key(&customer) {
-                // And that it reserved that specific ticket
-                if self.reserved[&customer].0 == ticket {
-                    // Remove the reservation
-                    self.reserved.remove(&customer);
+            // Attempt to remove a reservation for this customer
+            let reservation = self.reserved.remove(&customer);
 
-                    // Return ticket to non-reserved list or database
-                    if self.status == ServerStatus::Active {
-                        self.tickets.push(ticket);
+            match reservation {
+                // Make sure the customer has a reservation
+                Some((reservation_ticket, time)) => {
+                    // And that it reserved that specific ticket
+                    if reservation_ticket == ticket {
+                        // Return ticket to non-reserved list or database
+                        if self.status == ServerStatus::Active {
+                            self.tickets.push(ticket);
+                        } else {
+                            self.database.lock().deallocate(&[ticket]);
+                        }
+
+                        // Terminate server if this was the last reservation and server was
+                        // terminating
+                        if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
+                            self.status = ServerStatus::Terminated;
+                        }
+                        rq.respond_with_int(ticket);
                     } else {
-                        self.database.lock().deallocate(&[ticket]);
+                        // Insert the reservation back so it can still be cancelled later
+                        self.reserved.insert(customer, (reservation_ticket, time));
+                        rq.respond_with_err(
+                            "Our error: Reservation not made for that ticket for buy request.",
+                        )
                     }
-
-                    // Terminate server if this was the last reservation and server was terminating
-                    if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
-                        self.status = ServerStatus::Terminated;
-                    }
-                    rq.respond_with_int(ticket);
-                } else {
-                    rq.respond_with_err(
-                        "Our error: Reservation not made for that ticket for cancel request.",
-                    )
                 }
-            } else {
-                rq.respond_with_err("Our error: No reservation for cancel request.")
+                None => rq.respond_with_err("Our error: No reservation for cancel request."),
             }
         }
     }
