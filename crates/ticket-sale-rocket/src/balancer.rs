@@ -1,17 +1,15 @@
-//! Implementation of the load balancer
+//! Implementation of the balancer
 use ticket_sale_core::{Request, RequestHandler};
 
 use crate::balancer_bonus::BalancerBonus;
 use crate::balancer_standard::BalancerStandard;
 
-/// Implementation of the load balancer
-///
-/// ⚠️ This struct must implement the [`RequestHandler`] trait, and it must be
-/// exposed from the crate root (to be used from the tester as
-/// `ticket_sale_rocket::Balancer`).
 pub struct Balancer {
+    // May contain the regular balancer or the one used for the bonus
     balancer_standard: Option<BalancerStandard>,
     balancer_bonus: Option<BalancerBonus>,
+
+    // If we are in the bonus or not
     bonus: bool,
 }
 
@@ -31,26 +29,25 @@ impl Balancer {
 }
 
 impl RequestHandler for Balancer {
-    // 📌 Hint: Look into the `RequestHandler` trait definition for specification
-    // docstrings of `handle()` and `shutdown()`.
-
+    /// Handle a given request
     fn handle(&self, rq: Request) {
+        // Forward the request to the appropriate balancer
         if !self.bonus {
-            let balancer = match &self.balancer_standard {
-                Some(v) => v,
+            match &self.balancer_standard {
+                Some(balancer) => balancer.handle(rq),
                 None => panic!("Our panic: Standard balancer not found in request."),
             };
-            balancer.handle(rq);
         } else {
-            let balancer = match &self.balancer_bonus {
-                Some(v) => v,
+            match &self.balancer_bonus {
+                Some(balancer) => balancer.handle(rq),
                 None => panic!("Our panic: Bonus balancer not found in request."),
             };
-            balancer.handle(rq);
         }
     }
 
+    /// Shutdown the system
     fn shutdown(self) {
+        // Forward to the appropriate balancer
         if !self.bonus {
             match self.balancer_standard {
                 Some(balancer) => balancer.shutdown(),

@@ -1,4 +1,5 @@
-//! Implementation of the coordinator
+//! Implementation of the standard coordinator
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -11,62 +12,61 @@ use uuid::Uuid;
 
 use super::database::Database;
 use super::server_standard::ServerStandard;
-use crate::serverrequest::HighPriorityServerRequest;
-use crate::serverstatus::EstimatorServerStatus;
+use super::serverrequest::HighPriorityServerRequest;
+use super::serverstatus::EstimatorServerStatus;
 /// Coordinator orchestrating all the components of the system
 pub struct CoordinatorStandard {
+    database: Arc<Mutex<Database>>,
+
     /// The reservation timeout
     reservation_timeout: u32,
 
-    /// Reference to the [`Database`]
-    ///
-    /// To be handed over to new servers.
-    database: Arc<Mutex<Database>>,
-
-    /// number of non-terminating servers
+    /// Number of non-terminating servers
     pub no_active_servers: u32,
 
-    /// map between the id of a server and its index in the lists
+    /// Map between the id of a server and its index in the lists
     pub map_id_index: HashMap<Uuid, usize>,
 
-    /// lists containing the id, sender for low/high priority requests and thread for each
+    /// Lists containing the id, sender for low/high priority requests and thread for each
     /// server
     pub server_id_list: Vec<Uuid>,
     pub low_priority_sender_list: Vec<Sender<Request>>,
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,
 
-    /// channel through which servers send their id once they have fully terminated
-    terminated_sender: Sender<Uuid>,
-    terminated_receiver: Receiver<Uuid>,
+    /// Channel for notifying the coordinator of each server's termination
+    coordinator_terminated_sender: Sender<Uuid>,
+    coordinator_terminated_receiver: Receiver<Uuid>,
 
-    /// channel through which servers send their number of tickets to the estimator
-    estimator_sender: Sender<u32>,
-    scaling_sender: Sender<EstimatorServerStatus>,
+    /// Sender for servers to send their number of tickets to the estimator
+    estimator_tickets_sender: Sender<u32>,
+
+    /// Sender for servers to notify the estimator of their activation/termination
+    estimator_scaling_sender: Sender<EstimatorServerStatus>,
 }
 
 impl CoordinatorStandard {
-    /// Create the [`Coordinator`]
+    /// Create the [`CoordinatorStandard`]
     pub fn new(
-        reservation_timeout: u32,
         database: Arc<Mutex<Database>>,
-        estimator_sender: Sender<u32>,
-        scaling_sender: Sender<EstimatorServerStatus>,
+        reservation_timeout: u32,
+        estimator_tickets_sender: Sender<u32>,
+        estimator_scaling_sender: Sender<EstimatorServerStatus>,
     ) -> Self {
-        let (terminated_sender, terminated_receiver) = unbounded();
+        let (coordinator_terminated_sender, coordinator_terminated_receiver) = unbounded();
         Self {
-            reservation_timeout,
             database,
+            reservation_timeout,
             no_active_servers: 0,
             map_id_index: HashMap::new(),
             server_id_list: Vec::new(),
             low_priority_sender_list: Vec::new(),
             high_priority_sender_list: Vec::new(),
             thread_list: Vec::new(),
-            terminated_sender,
-            terminated_receiver,
-            estimator_sender,
-            scaling_sender,
+            coordinator_terminated_sender,
+            coordinator_terminated_receiver,
+            estimator_tickets_sender,
+            estimator_scaling_sender,
         }
     }
 
@@ -95,28 +95,28 @@ impl CoordinatorStandard {
         }
     }
 
-    ///remove terminated servers from lists
+    /// Remove terminated servers from lists
     pub fn update_servers(&mut self) {
-        // while there is a server that just terminated
-        while let Ok(uuid) = self.terminated_receiver.try_recv() {
-            // find its position in the lists
+        // While there is a server that just terminated
+        while let Ok(uuid) = self.coordinator_terminated_receiver.try_recv() {
+            // Find its position in the lists
             let index = *self.map_id_index.get(&uuid).unwrap();
             let n = self.server_id_list.len();
 
-            // if it is not the last one, swap it with the last one
+            // If it is not the last one, swap it with the last one
             if index != n - 1 {
                 self.server_id_list.swap(index, n - 1);
                 self.low_priority_sender_list.swap(index, n - 1);
                 self.high_priority_sender_list.swap(index, n - 1);
                 self.thread_list.swap(index, n - 1);
-                // update the index of the swapped server
+                // Update the index of the swapped server
                 *self
                     .map_id_index
                     .get_mut(&self.server_id_list[index])
                     .unwrap() = index;
             }
 
-            // remove the last server
+            // Remove the last server
             self.server_id_list.pop();
             self.low_priority_sender_list.pop();
             self.high_priority_sender_list.pop();
@@ -127,7 +127,7 @@ impl CoordinatorStandard {
 
     /// Scale to the given number of servers
     pub fn scale_to(&mut self, num_servers: u32, coordinator: Arc<Mutex<CoordinatorStandard>>) {
-        // remove terminated servers
+        // Remove terminated servers
         self.update_servers();
 
         // We need to activate servers
@@ -139,10 +139,16 @@ impl CoordinatorStandard {
                 // Get the channel for the server activation and activate the server
                 let _ = self.high_priority_sender_list[self.no_active_servers as usize]
                     .send(HighPriorityServerRequest::Activate);
-                let _ = self.scaling_sender.send(EstimatorServerStatus::Activated {
-                    server: self.server_id_list[self.no_active_servers as usize],
-                    sender: self.high_priority_sender_list[self.no_active_servers as usize].clone(),
-                });
+
+                // Notify the estimator of the server activation
+                let _ = self
+                    .estimator_scaling_sender
+                    .send(EstimatorServerStatus::Activated {
+                        server: self.server_id_list[self.no_active_servers as usize],
+                        sender: self.high_priority_sender_list[self.no_active_servers as usize]
+                            .clone(),
+                    });
+
                 self.no_active_servers += 1;
             }
 
@@ -159,24 +165,30 @@ impl CoordinatorStandard {
                     self.reservation_timeout,
                     low_priority_receiver,
                     high_priority_receiver,
-                    self.terminated_sender.clone(),
-                    self.estimator_sender.clone(),
-                    self.scaling_sender.clone(),
+                    self.coordinator_terminated_sender.clone(),
+                    self.estimator_tickets_sender.clone(),
+                    self.estimator_scaling_sender.clone(),
                 );
                 let server_id = server.id;
 
                 // Start the server
                 self.thread_list.push(thread::spawn(move || server.run()));
+
                 // Add everything to the lists
                 self.server_id_list.push(server_id);
                 self.low_priority_sender_list.push(low_priority_sender);
                 self.high_priority_sender_list.push(high_priority_sender);
                 self.map_id_index
                     .insert(server_id, self.no_active_servers as usize);
-                let _ = self.scaling_sender.send(EstimatorServerStatus::Activated {
-                    server: self.server_id_list[self.no_active_servers as usize],
-                    sender: self.high_priority_sender_list[self.no_active_servers as usize].clone(),
-                });
+
+                // Notify the estimator of the server activation
+                let _ = self
+                    .estimator_scaling_sender
+                    .send(EstimatorServerStatus::Activated {
+                        server: self.server_id_list[self.no_active_servers as usize],
+                        sender: self.high_priority_sender_list[self.no_active_servers as usize]
+                            .clone(),
+                    });
                 self.no_active_servers += 1;
             }
         }
@@ -195,9 +207,11 @@ impl CoordinatorStandard {
 
     /// Shut down all servers
     pub fn shutdown(&mut self) {
+        // Tell all servers to shut down
         for sender in self.high_priority_sender_list.iter() {
             let _ = sender.send(HighPriorityServerRequest::Shutdown);
         }
+        // Wait for them to do so
         for thread in self.thread_list.drain(..) {
             thread.join().unwrap();
         }

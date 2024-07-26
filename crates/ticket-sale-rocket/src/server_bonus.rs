@@ -1,6 +1,6 @@
-//! Implementation of the server
+//! Implementation of the bonus server
+
 #![allow(clippy::too_many_arguments)]
-use std::cmp::min;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -12,75 +12,83 @@ use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
+use super::coordinator_bonus::CoordinatorBonus;
 use super::database::Database;
 use super::serverrequest::HighPriorityServerRequest;
-use crate::coordinator_bonus::CoordinatorBonus;
-use crate::serverstatus::EstimatorServerStatus;
-use crate::serverstatus::ServerStatus;
+use super::serverstatus::EstimatorServerStatus;
+use super::serverstatus::ServerStatus;
 
-/// A server in the ticket sales system
 pub struct ServerBonus {
     /// The server's ID
     pub id: Uuid,
-    estimate: u32,
-    /// The database
+
     database: Arc<Mutex<Database>>,
     coordinator: Arc<Mutex<CoordinatorBonus>>,
 
-    /// current server status
+    /// Current server status
     status: ServerStatus,
 
-    /// list of non-reserved tickets
+    /// List of non-reserved tickets
     tickets: Vec<u32>,
 
-    /// map from customer id to ticket id and time it was reserved
-    reserved: HashMap<Uuid, (u32, Instant)>,
-    timeout_queue: VecDeque<(Uuid, Instant)>,
-    timeout: u32,
+    /// Estimate of tickets in other servers
+    estimate: u32,
 
-    /// channels for receiving requests
+    /// Map from customer id to ticket id and time it was reserved
+    reserved: HashMap<Uuid, (u32, Instant)>,
+
+    /// Queue of reservations as (customer id, time of reservation)
+    timeout_queue: VecDeque<(Uuid, Instant)>,
+
+    /// The reservation timeout
+    reservation_timeout: u32,
+
+    /// Receivers for receiving requests
     low_priority: Option<Receiver<Request>>,
     high_priority: Option<Receiver<HighPriorityServerRequest>>,
 
-    /// server sends its id through this channel once it terminated
-    terminated_sender: Sender<Uuid>,
-    /// channel through which it sends its number of tickets to the estimator
-    estimator_sender: Sender<u32>,
-    scaling_sender: Sender<EstimatorServerStatus>,
+    /// Sender for notifying the coordinator of the server's termination
+    coordinator_terminated_sender: Sender<Uuid>,
+
+    /// Sender for sending the server's number of tickets to the estimator
+    estimator_tickets_sender: Sender<u32>,
+
+    /// Sender for notifying the estimator of the server's termination
+    estimator_scaling_sender: Sender<EstimatorServerStatus>,
 }
 
 impl ServerBonus {
-    /// Create a new [`Server`]
+    /// Create a new [`ServerBonus`]
     pub fn new(
         database: Arc<Mutex<Database>>,
         coordinator: Arc<Mutex<CoordinatorBonus>>,
-        timeout: u32,
+        reservation_timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
-        terminated_sender: Sender<Uuid>,
-        estimator_sender: Sender<u32>,
-        scaling_sender: Sender<EstimatorServerStatus>,
+        coordinator_terminated_sender: Sender<Uuid>,
+        estimator_tickets_sender: Sender<u32>,
+        estimator_scaling_sender: Sender<EstimatorServerStatus>,
     ) -> Self {
         let id = Uuid::new_v4();
         Self {
             id,
-            estimate: 0,
             database,
             coordinator,
             status: ServerStatus::Active,
             tickets: Vec::new(),
+            estimate: 0,
             reserved: HashMap::new(),
             timeout_queue: VecDeque::new(),
-            timeout,
+            reservation_timeout,
             low_priority: Some(low_priority),
             high_priority: Some(high_priority),
-            terminated_sender,
-            estimator_sender,
-            scaling_sender,
+            coordinator_terminated_sender,
+            estimator_tickets_sender,
+            estimator_scaling_sender,
         }
     }
 
-    /// get the receiver for receiving low priority requests
+    /// Get the receiver for low priority requests
     pub fn get_low_priority_receiver(&self) -> &Receiver<Request> {
         match &self.low_priority {
             Some(value) => value,
@@ -90,7 +98,7 @@ impl ServerBonus {
         }
     }
 
-    /// get the receiver for receiving high priority requests
+    /// Get the receiver for high priority requests
     pub fn get_high_priority_receiver(&self) -> &Receiver<HighPriorityServerRequest> {
         match &self.high_priority {
             Some(value) => value,
@@ -100,30 +108,35 @@ impl ServerBonus {
         }
     }
 
-    /// main server loop
+    /// Main server loop
     pub fn run(&mut self) {
         loop {
-            // process the next request
+            // Process the next request
             self.process_request();
 
-            // if the server is supposedly terminated after that request
+            // If the server is supposedly terminated after that request
             if self.status == ServerStatus::Terminated {
-                // respond to all high priority requests to make sure
+                // Respond to all high priority requests to make sure
                 // it is still supposed to terminate
                 // i.e. no requests to activate enqueued
                 while self.try_process_high_priority() {}
 
-                // if the server is still terminated
+                // If the server is still terminated
                 if self.status == ServerStatus::Terminated {
+                    // Notify the estimator of the server termination
                     let _ = self
-                        .scaling_sender
+                        .estimator_scaling_sender
                         .send(EstimatorServerStatus::Deactivated { server: self.id });
-                    // drop the high priority receiver to prevent
+
+                    // Notify the coordinator of the server termination
+                    let _ = self.coordinator_terminated_sender.send(self.id);
+
+                    // Drop the high priority receiver to prevent
                     // further requests from being sent
                     let high_priority_channel = self.high_priority.take().unwrap();
                     drop(high_priority_channel);
 
-                    // assign a new server to all low priority requests
+                    // Assign a new server to all low priority requests
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
                         let coordinator_guard = self.coordinator.lock();
@@ -132,27 +145,24 @@ impl ServerBonus {
                         rq.respond_with_err("Our error: Server no longer exists.");
                     }
 
-                    // drop the low priority receiver to prevent
+                    // Drop the low priority receiver to prevent
                     // further reuqests from begin sent
                     drop(low_priority_channel);
 
-                    // send the server id to signal that the server terminated
-                    let _ = self.terminated_sender.send(self.id);
-
-                    // terminate the server
+                    // Terminate the server
                     break;
                 }
             }
 
-            // if the server needs to shut down after that request
+            // If the server needs to shut down after that request
             if self.status == ServerStatus::Shutdown {
-                // terminate the server
+                // Terminate the server
                 break;
             }
         }
     }
 
-    /// processes the next request
+    /// Processes the next request
     /// giving priority to high priority requests
     pub fn process_request(&mut self) {
         let high_priority_channel = self.get_high_priority_receiver();
@@ -167,6 +177,7 @@ impl ServerBonus {
                         self.process_low_priority(rq);
                     }
                     Err(_) => {
+                        // Avoid busy wait
                         self.wait_for_requests();
                     }
                 }
@@ -174,10 +185,11 @@ impl ServerBonus {
         }
     }
 
-    /// if no requests are available, wait for one, then process it
+    /// Waits for any request, then processes it
     pub fn wait_for_requests(&mut self) {
         let high_priority_channel = self.get_high_priority_receiver();
         let low_priority_channel = self.get_low_priority_receiver();
+
         select! {
             recv(high_priority_channel) -> msg => {
                 match msg {
@@ -202,7 +214,7 @@ impl ServerBonus {
         }
     }
 
-    /// processes a high priority request
+    /// Tries to process a high priority request
     /// returns true if there is one, false otherwise
     pub fn try_process_high_priority(&mut self) -> bool {
         let high_priority_channel = self.get_high_priority_receiver();
@@ -214,7 +226,7 @@ impl ServerBonus {
         }
     }
 
-    /// processes a given high priority request
+    /// Processes a given high priority request
     pub fn process_high_priority(&mut self, rq: HighPriorityServerRequest) {
         match rq {
             HighPriorityServerRequest::Activate => self.activate(),
@@ -226,84 +238,92 @@ impl ServerBonus {
         }
     }
 
-    /// activate the server
+    /// Activate the server
     pub fn activate(&mut self) {
-        // if the server is supposed to shut down do not interfere
+        // If the server is supposed to shut down, do not interfere
         if self.status == ServerStatus::Shutdown {
             return;
         }
         self.status = ServerStatus::Active;
     }
 
-    /// deactivate the server
+    /// Deactivate the server
     pub fn deactivate(&mut self) {
-        // if the server is supposed to shut down do not interfere
+        // If the server is supposed to shut down, do not interfere
         if self.status == ServerStatus::Shutdown {
             return;
         }
         self.status = ServerStatus::Terminating;
 
-        // clear all non-reserved tickets
+        // Clear all non-reserved tickets
         if !self.tickets.is_empty() {
             self.database.lock().deallocate(self.tickets.as_slice());
             self.tickets.clear();
         }
 
-        // if there are no reservations left, mark it as terminated
+        // If there are no reservations left, mark it as terminated
         if self.reserved.is_empty() {
             self.status = ServerStatus::Terminated;
         }
     }
 
-    /// removes reservations that have timed out
+    /// Removes reservations that have timed out
     pub fn remove_timeouted_reservations(&mut self) {
         let mut database_guard = self.database.lock();
 
-        // while we have reservations
+        // While we have reservations
         while !self.timeout_queue.is_empty() {
-            if self.timeout_queue.front().unwrap().1.elapsed().as_secs() <= self.timeout as u64 {
-                // no more timeouted reservations
+            if self.timeout_queue.front().unwrap().1.elapsed().as_secs()
+                <= self.reservation_timeout as u64
+            {
+                // No more timeouted reservations
                 break;
             }
-            // get customer and time of reservation
+            // Get customer and time of reservation
             let customer = self.timeout_queue.front().unwrap().0;
             let time = self.timeout_queue.front().unwrap().1;
             self.timeout_queue.pop_front();
 
-            // if reservation still exists
+            // If reservation still exists
             if self.reserved.contains_key(&customer) && self.reserved[&customer].1 == time {
                 let ticket = self.reserved[&customer].0;
-                // if the server is active
+                // If the server is active
                 if self.status == ServerStatus::Active {
-                    // return the ticket to the list
+                    // Return the ticket to the list
                     self.tickets.push(ticket);
                 } else {
-                    // otherwise, return it to the database
+                    // Otherwise, return it to the database
                     database_guard.deallocate(&[ticket]);
                 }
-                // remove reservation
+                // Remove reservation
                 self.reserved.remove(&customer);
             }
         }
         drop(database_guard);
 
-        // if no reservations are left and the server is terminating
+        // If no reservations are left and the server is terminating
         if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
-            // mark server as terminated
+            // Mark server as terminated
             self.status = ServerStatus::Terminated;
         }
     }
 
-    /// stores estimate and sends its number of tickets to the estimator
+    /// Stores estimate and sends its number of tickets to the estimator
     pub fn send_tickets(&mut self, tickets: u32) {
+        // Remove reservations that have timed out
         self.remove_timeouted_reservations();
+
         self.estimate = tickets;
-        let _ = self.estimator_sender.send(self.tickets.len() as u32);
+        let _ = self
+            .estimator_tickets_sender
+            .send(self.tickets.len() as u32);
     }
 
-    /// processes a given low priority request.
+    /// Processes a given low priority request
     pub fn process_low_priority(&mut self, rq: Request) {
+        // Remove reservations that have timed out
         self.remove_timeouted_reservations();
+
         match rq.kind() {
             RequestKind::NumAvailableTickets => {
                 rq.respond_with_int(self.get_available_tickets());
@@ -323,23 +343,23 @@ impl ServerBonus {
         }
     }
 
-    /// get number of available tickets
+    /// Get number of available tickets
     pub fn get_available_tickets(&self) -> u32 {
         self.tickets.len() as u32 + self.estimate
     }
 
-    /// process a reservation
+    /// Process a reservation request
     pub fn process_reservation(&mut self, mut rq: Request) {
-        // get the customer and check if he already has a reservation
+        // Get the customer id and check if he already has a reservation
         let customer = rq.customer_id();
         if self.reserved.contains_key(&customer) {
             rq.respond_with_err("Our error: One reservation already present.");
             return;
         }
 
-        // if the server is terminating
+        // If the server is terminating
         if self.status == ServerStatus::Terminating {
-            // assign a new server and respond with error
+            // Assign a new server and respond with error
             let coordinator_guard = self.coordinator.lock();
             let (x, _) = coordinator_guard.get_random_server_sender();
             rq.set_server_id(x);
@@ -347,27 +367,27 @@ impl ServerBonus {
             return;
         }
 
-        // if server doesn't have any tickets
+        // If server doesn't have any tickets
         if self.tickets.is_empty() {
             let mut database_guard = self.database.lock();
 
+            // If the database also doesn't have tickets => sold out
             if database_guard.get_num_available() == 0 {
                 rq.respond_with_sold_out();
                 return;
             }
 
-            // get tickets from database
+            // Get the number of tickets in the database
             let database_tickets = database_guard.get_num_available();
 
-            let num_tickets = min(
-                ((database_tickets as f64).sqrt() as u32) * 2,
-                database_tickets,
-            );
+            // Determine number of tickets to allocate
+            let num_tickets = (database_tickets as f64).sqrt() as u32;
 
+            // Allocate the tickets
             self.tickets.extend(database_guard.allocate(num_tickets));
         }
 
-        // reserve the last ticket
+        // Reserve the last ticket
         let ticket = self.tickets.pop().unwrap();
         let time = Instant::now();
         self.reserved.insert(customer, (ticket, time));
@@ -375,24 +395,24 @@ impl ServerBonus {
         rq.respond_with_int(ticket);
     }
 
-    /// process a buy request
+    /// Process a buy request
     pub fn process_buy(&mut self, mut rq: Request) {
-        // make sure the request has a ticket id
+        // Make sure the request has a ticket id
         let ticket_option = rq.read_u32();
         if ticket_option.is_none() {
             rq.respond_with_err("Our error: No ticket id given.");
         } else {
-            // get ticket id and customer id
+            // Get ticket id and customer id
             let ticket = ticket_option.unwrap();
             let customer = rq.customer_id();
 
-            // make sure the customer has a reservation
+            // Make sure the customer has a reservation
             if self.reserved.contains_key(&customer) {
-                // and that it reserved that specific ticket
+                // And that it reserved that specific ticket
                 if self.reserved[&customer].0 == ticket {
-                    // remove the reservation
+                    // Remove the reservation
                     self.reserved.remove(&customer);
-                    // terminate server if this was the last reservation and server was terminating
+                    // Terminate server if this was the last reservation and server was terminating
                     if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
                         self.status = ServerStatus::Terminated;
                     }
@@ -408,31 +428,32 @@ impl ServerBonus {
         }
     }
 
+    /// Process a cancel request
     pub fn process_cancel(&mut self, mut rq: Request) {
-        // make sure the request has a ticket id
+        // Make sure the request has a ticket id
         let ticket_option = rq.read_u32();
         if ticket_option.is_none() {
             rq.respond_with_err("Our error: No ticket id given.");
         } else {
-            // get ticket id and customer id
+            // Get ticket id and customer id
             let ticket = ticket_option.unwrap();
             let customer = rq.customer_id();
 
-            // make sure the customer has a reservation
+            // Make sure the customer has a reservation
             if self.reserved.contains_key(&customer) {
-                // and that it reserved that specific ticket
+                // And that it reserved that specific ticket
                 if self.reserved[&customer].0 == ticket {
-                    // remove the reservation
+                    // Remove the reservation
                     self.reserved.remove(&customer);
 
-                    // return ticket to non-reserved list or database
+                    // Return ticket to non-reserved list or database
                     if self.status == ServerStatus::Active {
                         self.tickets.push(ticket);
                     } else {
                         self.database.lock().deallocate(&[ticket]);
                     }
 
-                    // terminate server if this was the last reservation and server was terminating
+                    // Terminate server if this was the last reservation and server was terminating
                     if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
                         self.status = ServerStatus::Terminated;
                     }

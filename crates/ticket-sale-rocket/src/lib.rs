@@ -45,67 +45,73 @@ use database::Database;
 ///
 /// :warning: This functions must not be renamed and its signature must not be changed.
 pub fn launch(config: &Config) -> Balancer {
-    if !config.bonus {
-        let database = Arc::new(Mutex::new(Database::new(config.tickets)));
+    // Create the database
+    let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
-        let (estimator_sender, estimator_receiver) = unbounded();
-        let (scaling_sender, scaling_receiver) = unbounded();
+    // Create estimator channels
+    let (estimator_tickets_sender, estimator_tickets_receiver) = unbounded();
+    let (estimator_scaling_sender, estimator_scaling_receiver) = unbounded();
+    let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
+
+    if !config.bonus {
+        // Create the coordinator and scale to initial number of servers
         let coordinator = Arc::new(Mutex::new(CoordinatorStandard::new(
-            config.timeout,
             database.clone(),
-            estimator_sender,
-            scaling_sender,
+            config.timeout,
+            estimator_tickets_sender,
+            estimator_scaling_sender,
         )));
         coordinator
             .lock()
             .scale_to(config.initial_servers, coordinator.clone());
 
-        let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
-
+        // Create the estimator and start it
         let mut estimator = EstimatorStandard::new(
             database.clone(),
             config.estimator_roundtrip_time,
-            estimator_receiver,
-            scaling_receiver,
+            estimator_tickets_receiver,
+            estimator_scaling_receiver,
             estimator_shutdown_receiver,
         );
-        let other_thread = thread::spawn(move || {
+        let estimator_thread = thread::spawn(move || {
             estimator.run();
         });
-        let balancer_standard =
-            BalancerStandard::new(coordinator, estimator_shutdown_sender, other_thread);
 
+        // Create the standard balancer
+        let balancer_standard =
+            BalancerStandard::new(coordinator, estimator_shutdown_sender, estimator_thread);
+
+        // Create the balancer
         Balancer::new(Some(balancer_standard), None, false)
     } else {
-        let database = Arc::new(Mutex::new(Database::new(config.tickets)));
-
-        let (estimator_sender, estimator_receiver) = unbounded();
-        let (scaling_sender, scaling_receiver) = unbounded();
+        // Create the coordinator and scale to initial number of servers
         let coordinator = Arc::new(Mutex::new(CoordinatorBonus::new(
-            config.timeout,
             database.clone(),
-            estimator_sender,
-            scaling_sender,
+            config.timeout,
+            estimator_tickets_sender,
+            estimator_scaling_sender,
         )));
         coordinator
             .lock()
             .scale_to(config.initial_servers, coordinator.clone());
 
-        let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
-
+        // Create the estimator and start it
         let mut estimator = EstimatorBonus::new(
             database.clone(),
             config.estimator_roundtrip_time,
-            estimator_receiver,
-            scaling_receiver,
+            estimator_tickets_receiver,
+            estimator_scaling_receiver,
             estimator_shutdown_receiver,
         );
-        let other_thread = thread::spawn(move || {
+        let estimator_thread = thread::spawn(move || {
             estimator.run();
         });
-        let balancer_bonus =
-            BalancerBonus::new(coordinator, estimator_shutdown_sender, other_thread);
 
+        // Create the bonus balancer
+        let balancer_bonus =
+            BalancerBonus::new(coordinator, estimator_shutdown_sender, estimator_thread);
+
+        // Create the balancer
         Balancer::new(None, Some(balancer_bonus), true)
     }
 }

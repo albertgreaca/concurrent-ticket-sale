@@ -1,4 +1,5 @@
-//! Implementation of the load balancer
+//! Implementation of the bonus balancer
+
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
@@ -9,60 +10,65 @@ use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
 use super::coordinator_bonus::CoordinatorBonus;
-/// Implementation of the load balancer
-///
-/// ⚠️ This struct must implement the [`RequestHandler`] trait, and it must be
-/// exposed from the crate root (to be used from the tester as
-/// `ticket_sale_rocket::Balancer`).
+
 pub struct BalancerBonus {
     coordinator: Arc<Mutex<CoordinatorBonus>>,
-    estimator_shutdown: mpsc::Sender<()>,
+
+    // Sender for telling the estimator to shut down
+    estimator_shutdown_sender: mpsc::Sender<()>,
+
+    // Thread the estimator runs in
     estimator_thread: JoinHandle<()>,
+
+    // Maps from server id to its low priority sender
     server_sender: DashMap<Uuid, Sender<Request>>,
 }
 
 impl BalancerBonus {
-    /// Create a new [`Balancer`]
+    /// Create a new [`BalancerBonus`]
     pub fn new(
         coordinator: Arc<Mutex<CoordinatorBonus>>,
-        estimator_shutdown: mpsc::Sender<()>,
+        estimator_shutdown_sender: mpsc::Sender<()>,
         estimator_thread: JoinHandle<()>,
     ) -> Self {
         Self {
             coordinator,
-            estimator_shutdown,
+            estimator_shutdown_sender,
             estimator_thread,
             server_sender: DashMap::new(),
         }
     }
-    /// assign a server and forward the request to the server
+
+    /// Get the id and low priority sender of a random server
     fn get_server_sender(&self) -> (Uuid, Sender<Request>) {
+        // Get the random pair from the coordinator
         let (server, sender) = self.coordinator.lock().get_random_server_sender();
+
+        // If we don't store it yet, insert it
         if !self.server_sender.contains_key(&server) {
             self.server_sender.insert(server, sender.clone());
         }
+
         (server, sender)
     }
 }
 
 impl RequestHandler for BalancerBonus {
-    // 📌 Hint: Look into the `RequestHandler` trait definition for specification
-    // docstrings of `handle()` and `shutdown()`.
-
+    /// Handle a given request
     fn handle(&self, mut rq: Request) {
         match rq.kind() {
             RequestKind::GetNumServers => {
-                // get the number of servers with status 0
+                // Get the number of non-terminating servers
                 rq.respond_with_int(self.coordinator.lock().get_num_active_servers());
             }
             RequestKind::GetServers => {
-                // get the servers with status 0
+                // Get the non-terminating servers
                 rq.respond_with_server_list(self.coordinator.lock().get_active_servers());
             }
             RequestKind::SetNumServers => {
                 match rq.read_u32() {
                     Some(n) => {
-                        // set number of servers with status 0 to n
+                        // Set number of active servers to n
                         self.coordinator
                             .lock()
                             .scale_to(n, self.coordinator.clone());
@@ -80,19 +86,25 @@ impl RequestHandler for BalancerBonus {
             }
             _ => {
                 match rq.server_id() {
-                    // request already has a server
+                    // Request already has a server
                     Some(server) => {
+                        // Get the low priority sender for this server
                         let sender = if self.server_sender.contains_key(&server) {
+                            // If it is in the map, get it from there
                             self.server_sender.get(&server).unwrap().clone()
                         } else {
+                            // Otherwise, get it from the coordinator
                             let aux = self.coordinator.lock().get_low_priority_sender(server);
+                            // And insert it in the map
                             self.server_sender.insert(server, aux.clone());
                             aux
                         };
+                        // Attempt to forward the request
                         let response = sender.send(rq);
                         match response {
                             Ok(_) => {}
                             Err(senderr) => {
+                                // Not forwarded => server terminated => assign new server
                                 let mut rq = senderr.into_inner();
                                 let (server, _) = self.get_server_sender();
                                 rq.set_server_id(server);
@@ -100,8 +112,9 @@ impl RequestHandler for BalancerBonus {
                             }
                         }
                     }
-                    // request doesn't have a server
+                    // Request doesn't have a server
                     None => {
+                        // Assign a server and forward the request to the server
                         let (server, sender) = self.get_server_sender();
                         rq.set_server_id(server);
                         let _ = sender.send(rq);
@@ -112,10 +125,11 @@ impl RequestHandler for BalancerBonus {
     }
 
     fn shutdown(self) {
-        // tell the estimator to shut down
-        let _ = self.estimator_shutdown.send(());
+        // Tell the estimator to shut down
+        let _ = self.estimator_shutdown_sender.send(());
+        // Wait for it to finish
         self.estimator_thread.join().unwrap();
-        // tell servers to shut down
+        // Tell servers to shut down
         self.coordinator.lock().shutdown();
     }
 }
