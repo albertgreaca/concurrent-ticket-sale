@@ -55,6 +55,9 @@ pub struct ServerBonus {
 
     /// Sender for notifying the estimator of the server's termination
     estimator_scaling_sender: Sender<EstimatorServerStatus>,
+
+    user_session_finished_send: Sender<Uuid>
+
 }
 
 impl ServerBonus {
@@ -68,6 +71,8 @@ impl ServerBonus {
         coordinator_terminated_sender: Sender<Uuid>,
         estimator_tickets_sender: Sender<u32>,
         estimator_scaling_sender: Sender<EstimatorServerStatus>,
+        user_session_finished_send: Sender<Uuid>
+
     ) -> Self {
         let id = Uuid::new_v4();
         Self {
@@ -85,7 +90,9 @@ impl ServerBonus {
             coordinator_terminated_sender,
             estimator_tickets_sender,
             estimator_scaling_sender,
+            user_session_finished_send
         }
+    
     }
 
     /// Get the receiver for low priority requests
@@ -297,6 +304,8 @@ impl ServerBonus {
                 }
                 // Remove reservation
                 self.reserved.remove(&customer);
+                // send to channel User with finished session
+                let _ = self.user_session_finished_send.send(customer);
             }
         }
         drop(database_guard);
@@ -416,6 +425,7 @@ impl ServerBonus {
                     if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
                         self.status = ServerStatus::Terminated;
                     }
+                    let _ = self.user_session_finished_send.send(customer);
                     rq.respond_with_int(ticket);
                 } else {
                     rq.respond_with_err(
@@ -457,6 +467,7 @@ impl ServerBonus {
                     if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
                         self.status = ServerStatus::Terminated;
                     }
+                    let _ = self.user_session_finished_send.send(customer);
                     rq.respond_with_int(ticket);
                 } else {
                     rq.respond_with_err(

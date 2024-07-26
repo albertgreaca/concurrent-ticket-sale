@@ -86,12 +86,15 @@ pub fn launch(config: &Config) -> Balancer {
         // Create the balancer
         Balancer::new(Some(balancer_standard), None, false)
     } else {
+
+        let (finished_session_send, finished_session_recv) = unbounded();
         // Create the coordinator and scale to initial number of servers
         let coordinator = Arc::new(Mutex::new(CoordinatorBonus::new(
             database.clone(),
             config.timeout,
             estimator_tickets_sender,
             estimator_scaling_sender,
+            finished_session_send
         )));
         coordinator
             .lock()
@@ -111,7 +114,7 @@ pub fn launch(config: &Config) -> Balancer {
 
         // Create the bonus balancer
         let balancer_bonus =
-            BalancerBonus::new(coordinator, estimator_shutdown_sender, estimator_thread);
+            BalancerBonus::new(coordinator, estimator_shutdown_sender, estimator_thread, finished_session_recv);
 
         // Create the balancer
         Balancer::new(None, Some(balancer_bonus), true)
