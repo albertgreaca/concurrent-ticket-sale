@@ -2,31 +2,32 @@
 use std::sync::{mpsc, Arc};
 use std::{collections::HashMap, time::Duration};
 
-use crossbeam::channel::Receiver;
+use crossbeam::channel::{Receiver, Sender};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
-use super::coordinator2::Coordinator2;
 use super::database::Database;
 use super::serverrequest::HighPriorityServerRequest;
+use crate::serverstatus::EstimatorServerStatus;
 
 /// Estimator that estimates the number of tickets available overall
-pub struct Estimator2 {
+pub struct EstimatorBonus {
     database: Arc<Mutex<Database>>,
-    coordinator: Arc<Coordinator2>,
     roundtrip_secs: u32,
 
     /// number of tickets known to be in each server
-    tickets_in_server: HashMap<Uuid, u32>,
+    server_tickets: HashMap<Uuid, u32>,
+    server_senders: HashMap<Uuid, Sender<HighPriorityServerRequest>>,
 
     /// channel through which the estimator receives the number of tickets from each
     /// server
     receive_from_server: Receiver<u32>,
+    receive_scaling: Receiver<EstimatorServerStatus>,
 
     estimator_shutdown: mpsc::Receiver<()>,
 }
 
-impl Estimator2 {
+impl EstimatorBonus {
     /// The estimator's main routine.
     ///
     /// `roundtrip_secs` is the time in seconds the estimator needs to contact all
@@ -35,17 +36,18 @@ impl Estimator2 {
 
     pub fn new(
         database: Arc<Mutex<Database>>,
-        coordinator: Arc<Coordinator2>,
         roundtrip_secs: u32,
         receive_from_server: Receiver<u32>,
+        receive_scaling: Receiver<EstimatorServerStatus>,
         estimator_shutdown: mpsc::Receiver<()>,
     ) -> Self {
         Self {
-            coordinator,
             database,
             roundtrip_secs,
-            tickets_in_server: HashMap::new(),
+            server_tickets: HashMap::new(),
+            server_senders: HashMap::new(),
             receive_from_server,
+            receive_scaling,
             estimator_shutdown,
         }
     }
@@ -54,28 +56,37 @@ impl Estimator2 {
         loop {
             let mut stop = false; // becomes true when the estimator needs to shut down
 
-            // get non-terminated servers and the senders for high priority requests
-            let (servers, senders) = self.coordinator.get_estimator();
+            while let Ok(msg) = self.receive_scaling.try_recv() {
+                match msg {
+                    EstimatorServerStatus::Activated { server, sender } => {
+                        self.server_senders.insert(server, sender);
+                        self.server_tickets.insert(server, 0);
+                    }
+                    EstimatorServerStatus::Deactivated { server } => {
+                        self.server_senders.remove(&server);
+                        self.server_tickets.remove(&server);
+                    }
+                }
+            }
 
             // get number of tickets in the database
             let tickets = self.database.lock().get_num_available();
 
             // calculate the sleep time between servers
-            let time_seconds = (self.roundtrip_secs as f64) / (servers.len() as f64);
+            let time_seconds = (self.roundtrip_secs as f64) / (self.server_senders.len() as f64);
             let time_miliseconds = (time_seconds * 1000f64).floor() as u64;
 
             // calculate the total number of tickets known to be in the servers from previous
             // iterations
             let mut sum = 0;
-            for server in servers.clone() {
-                self.tickets_in_server.entry(server).or_insert(0);
-                sum += self.tickets_in_server[&server];
+            for (_, tickets) in &self.server_tickets {
+                sum += tickets;
             }
 
             // main estimator loop
-            for (server, sender) in servers.iter().zip(senders.iter()) {
+            for (server, sender) in &self.server_senders {
                 // make sum the number of tickets known to be in the other servers
-                sum -= self.tickets_in_server[server];
+                sum -= self.server_tickets[server];
 
                 // send the number of tickets in the other servers + the database
                 let aux = sender.send(HighPriorityServerRequest::Estimate {
@@ -84,18 +95,18 @@ impl Estimator2 {
                 match aux {
                     Ok(_) => {
                         // message was sent => server not terminated => wait for response
-                        *self.tickets_in_server.get_mut(server).unwrap() =
+                        *self.server_tickets.get_mut(server).unwrap() =
                             self.receive_from_server.recv().unwrap();
                     }
                     Err(_) => {
                         // message not sent => server terminated mid loop =>
                         // it should've cleared all tickets so it has 0 left
-                        *self.tickets_in_server.get_mut(server).unwrap() = 0;
+                        *self.server_tickets.get_mut(server).unwrap() = 0;
                     }
                 }
 
                 // make sum the number of tickets known to be in all servers again
-                sum += self.tickets_in_server[server];
+                sum += self.server_tickets[server];
 
                 // wait for time_miliseconds miliseconds, but break the for loop if shutdown signal
                 // is received

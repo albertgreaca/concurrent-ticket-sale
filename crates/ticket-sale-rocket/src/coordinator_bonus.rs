@@ -10,11 +10,11 @@ use ticket_sale_core::Request;
 use uuid::Uuid;
 
 use super::database::Database;
-use super::server::Server;
+use super::server_bonus::ServerBonus;
 use crate::serverrequest::HighPriorityServerRequest;
 use crate::serverstatus::EstimatorServerStatus;
 /// Coordinator orchestrating all the components of the system
-pub struct Coordinator {
+pub struct CoordinatorBonus {
     /// The reservation timeout
     reservation_timeout: u32,
 
@@ -45,7 +45,7 @@ pub struct Coordinator {
     scaling_sender: Sender<EstimatorServerStatus>,
 }
 
-impl Coordinator {
+impl CoordinatorBonus {
     /// Create the [`Coordinator`]
     pub fn new(
         reservation_timeout: u32,
@@ -130,7 +130,7 @@ impl Coordinator {
     }
 
     /// Scale to the given number of servers
-    pub fn scale_to(&mut self, num_servers: u32, coordinator: Arc<Mutex<Coordinator>>) {
+    pub fn scale_to(&mut self, num_servers: u32, coordinator: Arc<Mutex<CoordinatorBonus>>) {
         // remove terminated servers
         self.update_servers();
 
@@ -157,7 +157,7 @@ impl Coordinator {
                 let (high_priority_sender, high_priority_receiver) = unbounded();
 
                 // Create the server
-                let mut server = Server::new(
+                let mut server = ServerBonus::new(
                     self.database.clone(),
                     coordinator.clone(),
                     self.reservation_timeout,

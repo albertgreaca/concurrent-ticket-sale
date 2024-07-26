@@ -6,13 +6,13 @@ team-name = "👀 Manchmal ist das Leben halt so..."
 language = "rust"
 
 # Whether you implemented the bonus
-bonus-implemented = false
+bonus-implemented = true
 
 # Instruct the testing framework to test your bonus implementation. This is
 # only relevant for testing locally. In Mission Control, we will test both the
 # regular version and the bonus if you set `bonus-implemented = true` above. The
 # `CP_BONUS` environment variable overrides this setting.
-test-bonus = false
+test-bonus = true
 
 # Java-specific settings
 [java]

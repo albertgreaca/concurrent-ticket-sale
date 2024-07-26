@@ -14,17 +14,18 @@ use uuid::Uuid;
 
 use super::database::Database;
 use super::serverrequest::HighPriorityServerRequest;
-use crate::coordinator2::Coordinator2;
+use crate::coordinator_bonus::CoordinatorBonus;
+use crate::serverstatus::EstimatorServerStatus;
 use crate::serverstatus::ServerStatus;
 
 /// A server in the ticket sales system
-pub struct Server2 {
+pub struct ServerBonus {
     /// The server's ID
     pub id: Uuid,
     estimate: u32,
     /// The database
     database: Arc<Mutex<Database>>,
-    coordinator: Arc<Coordinator2>,
+    coordinator: Arc<Mutex<CoordinatorBonus>>,
 
     /// current server status
     status: ServerStatus,
@@ -45,35 +46,29 @@ pub struct Server2 {
     terminated_sender: Sender<Uuid>,
     /// channel through which it sends its number of tickets to the estimator
     estimator_sender: Sender<u32>,
+    scaling_sender: Sender<EstimatorServerStatus>,
 }
 
-impl Server2 {
+impl ServerBonus {
     /// Create a new [`Server`]
     pub fn new(
         database: Arc<Mutex<Database>>,
-        coordinator: Arc<Coordinator2>,
+        coordinator: Arc<Mutex<CoordinatorBonus>>,
         timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
         terminated_sender: Sender<Uuid>,
         estimator_sender: Sender<u32>,
+        scaling_sender: Sender<EstimatorServerStatus>,
     ) -> Self {
         let id = Uuid::new_v4();
-        let database_tickets = database.lock().get_num_available();
-
-        let num_tickets = min(
-            ((database_tickets as f64).sqrt() as u32) * 2,
-            database_tickets,
-        );
-
-        let tickets = database.lock().allocate(num_tickets);
         Self {
             id,
             estimate: 0,
             database,
             coordinator,
             status: ServerStatus::Active,
-            tickets,
+            tickets: Vec::new(),
             reserved: HashMap::new(),
             timeout_queue: VecDeque::new(),
             timeout,
@@ -81,6 +76,7 @@ impl Server2 {
             high_priority: Some(high_priority),
             terminated_sender,
             estimator_sender,
+            scaling_sender,
         }
     }
 
@@ -119,6 +115,9 @@ impl Server2 {
 
                 // if the server is still terminated
                 if self.status == ServerStatus::Terminated {
+                    let _ = self
+                        .scaling_sender
+                        .send(EstimatorServerStatus::Deactivated { server: self.id });
                     // drop the high priority receiver to prevent
                     // further requests from being sent
                     let high_priority_channel = self.high_priority.take().unwrap();
@@ -127,7 +126,8 @@ impl Server2 {
                     // assign a new server to all low priority requests
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
-                        let x = self.coordinator.get_random_server();
+                        let coordinator_guard = self.coordinator.lock();
+                        let (x, _) = coordinator_guard.get_random_server_sender();
                         rq.set_server_id(x);
                         rq.respond_with_err("Our error: Server no longer exists.");
                     }
@@ -340,7 +340,8 @@ impl Server2 {
         // if the server is terminating
         if self.status == ServerStatus::Terminating {
             // assign a new server and respond with error
-            let x = self.coordinator.get_random_server();
+            let coordinator_guard = self.coordinator.lock();
+            let (x, _) = coordinator_guard.get_random_server_sender();
             rq.set_server_id(x);
             rq.respond_with_err("Our error: Ticket reservations no longer allowed on this server");
             return;

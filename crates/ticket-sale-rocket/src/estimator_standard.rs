@@ -11,7 +11,7 @@ use super::serverrequest::HighPriorityServerRequest;
 use crate::serverstatus::EstimatorServerStatus;
 
 /// Estimator that estimates the number of tickets available overall
-pub struct Estimator {
+pub struct EstimatorStandard {
     database: Arc<Mutex<Database>>,
     roundtrip_secs: u32,
 
@@ -27,7 +27,7 @@ pub struct Estimator {
     estimator_shutdown: mpsc::Receiver<()>,
 }
 
-impl Estimator {
+impl EstimatorStandard {
     /// The estimator's main routine.
     ///
     /// `roundtrip_secs` is the time in seconds the estimator needs to contact all

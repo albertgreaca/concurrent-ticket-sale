@@ -14,18 +14,18 @@ use uuid::Uuid;
 
 use super::database::Database;
 use super::serverrequest::HighPriorityServerRequest;
-use crate::coordinator::Coordinator;
+use crate::coordinator_standard::CoordinatorStandard;
 use crate::serverstatus::EstimatorServerStatus;
 use crate::serverstatus::ServerStatus;
 
 /// A server in the ticket sales system
-pub struct Server {
+pub struct ServerStandard {
     /// The server's ID
     pub id: Uuid,
     estimate: u32,
     /// The database
     database: Arc<Mutex<Database>>,
-    coordinator: Arc<Mutex<Coordinator>>,
+    coordinator: Arc<Mutex<CoordinatorStandard>>,
 
     /// current server status
     status: ServerStatus,
@@ -49,18 +49,18 @@ pub struct Server {
     scaling_sender: Sender<EstimatorServerStatus>,
 }
 
-impl Server {
+impl ServerStandard {
     /// Create a new [`Server`]
     pub fn new(
         database: Arc<Mutex<Database>>,
-        coordinator: Arc<Mutex<Coordinator>>,
+        coordinator: Arc<Mutex<CoordinatorStandard>>,
         timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
         terminated_sender: Sender<Uuid>,
         estimator_sender: Sender<u32>,
         scaling_sender: Sender<EstimatorServerStatus>,
-    ) -> Server {
+    ) -> Self {
         let id = Uuid::new_v4();
         Self {
             id,
@@ -127,7 +127,7 @@ impl Server {
                     let low_priority_channel = self.low_priority.take().unwrap();
                     while let Ok(mut rq) = low_priority_channel.try_recv() {
                         let coordinator_guard = self.coordinator.lock();
-                        let (x, _) = coordinator_guard.get_random_server_sender();
+                        let x = coordinator_guard.get_random_server();
                         rq.set_server_id(x);
                         rq.respond_with_err("Our error: Server no longer exists.");
                     }
@@ -341,7 +341,7 @@ impl Server {
         if self.status == ServerStatus::Terminating {
             // assign a new server and respond with error
             let coordinator_guard = self.coordinator.lock();
-            let (x, _) = coordinator_guard.get_random_server_sender();
+            let x = coordinator_guard.get_random_server();
             rq.set_server_id(x);
             rq.respond_with_err("Our error: Ticket reservations no longer allowed on this server");
             return;
