@@ -32,7 +32,7 @@ impl RequestHandler for Balancer {
     /// Handle a given request
     fn handle(&self, rq: Request) {
         // Forward the request to the appropriate balancer
-        if !self.bonus {
+        if self.bonus {
             match &self.balancer_standard {
                 Some(balancer) => balancer.handle(rq),
                 None => panic!("Our panic: Standard balancer not found in request."),
@@ -48,7 +48,7 @@ impl RequestHandler for Balancer {
     /// Shutdown the system
     fn shutdown(self) {
         // Forward to the appropriate balancer
-        if !self.bonus {
+        if self.bonus {
             match self.balancer_standard {
                 Some(balancer) => balancer.shutdown(),
                 None => panic!("Our panic: Standard balancer not found in shutdown."),
