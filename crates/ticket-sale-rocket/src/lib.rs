@@ -54,6 +54,8 @@ pub fn launch(config: &Config) -> Balancer {
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
 
     if !config.bonus {
+        let (estimator_tickets_sender, estimator_tickets_receiver) = mpsc::channel();
+        let (estimator_scaling_sender, estimator_scaling_receiver) = mpsc::channel();
         // Create the coordinator and scale to initial number of servers
         let coordinator = Arc::new(Mutex::new(CoordinatorStandard::new(
             database.clone(),

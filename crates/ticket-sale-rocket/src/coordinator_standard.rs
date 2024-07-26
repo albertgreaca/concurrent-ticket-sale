@@ -1,7 +1,8 @@
 //! Implementation of the standard coordinator
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::mpsc::channel;
+use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 
 use crossbeam::channel::{unbounded, Receiver, Sender};
@@ -35,14 +36,14 @@ pub struct CoordinatorStandard {
     thread_list: Vec<JoinHandle<()>>,
 
     /// Channel for notifying the coordinator of each server's termination
-    coordinator_terminated_sender: Sender<Uuid>,
-    coordinator_terminated_receiver: Receiver<Uuid>,
+    coordinator_terminated_sender: mpsc::Sender<Uuid>,
+    coordinator_terminated_receiver: mpsc::Receiver<Uuid>,
 
     /// Sender for servers to send their number of tickets to the estimator
-    estimator_tickets_sender: Sender<u32>,
+    estimator_tickets_sender: mpsc::Sender<u32>,
 
     /// Sender for servers to notify the estimator of their activation/termination
-    estimator_scaling_sender: Sender<EstimatorServerStatus>,
+    estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
 }
 
 impl CoordinatorStandard {
@@ -50,10 +51,10 @@ impl CoordinatorStandard {
     pub fn new(
         database: Arc<Mutex<Database>>,
         reservation_timeout: u32,
-        estimator_tickets_sender: Sender<u32>,
-        estimator_scaling_sender: Sender<EstimatorServerStatus>,
+        estimator_tickets_sender: mpsc::Sender<u32>,
+        estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
     ) -> Self {
-        let (coordinator_terminated_sender, coordinator_terminated_receiver) = unbounded();
+        let (coordinator_terminated_sender, coordinator_terminated_receiver) = channel();
         Self {
             database,
             reservation_timeout,

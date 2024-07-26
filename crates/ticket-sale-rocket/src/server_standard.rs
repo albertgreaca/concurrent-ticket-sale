@@ -3,6 +3,7 @@
 #![allow(clippy::too_many_arguments)]
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -48,13 +49,13 @@ pub struct ServerStandard {
     high_priority: Option<Receiver<HighPriorityServerRequest>>,
 
     /// Sender for notifying the coordinator of the server's termination
-    coordinator_terminated_sender: Sender<Uuid>,
+    coordinator_terminated_sender: mpsc::Sender<Uuid>,
 
     /// Sender for sending the server's number of tickets to the estimator
-    estimator_tickets_sender: Sender<u32>,
+    estimator_tickets_sender: mpsc::Sender<u32>,
 
     /// Sender for notifying the estimator of the server's termination
-    estimator_scaling_sender: Sender<EstimatorServerStatus>,
+    estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
 }
 
 impl ServerStandard {
@@ -65,9 +66,9 @@ impl ServerStandard {
         reservation_timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
-        coordinator_terminated_sender: Sender<Uuid>,
-        estimator_tickets_sender: Sender<u32>,
-        estimator_scaling_sender: Sender<EstimatorServerStatus>,
+        coordinator_terminated_sender: mpsc::Sender<Uuid>,
+        estimator_tickets_sender: mpsc::Sender<u32>,
+        estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
     ) -> Self {
         let id = Uuid::new_v4();
         Self {
