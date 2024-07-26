@@ -1,5 +1,6 @@
 //! Implementation of the bonus balancer
 
+#![allow(clippy::while_let_loop)]
 use std::collections::HashSet;
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
@@ -61,21 +62,26 @@ impl BalancerBonus {
     }
 
     fn update_active_user_sessions(&self) {
-        loop {
-            match self.user_session_receiver.try_recv() {
-                Ok(user_session_status) => {
-                    match user_session_status {
-                        UserSessionStatus::Activated { user } => {
-                            self.active_user_sessions.lock().insert(user);
-                        }
-                        UserSessionStatus::Deactivated { user } => {
-                            self.active_user_sessions.lock().remove(&user);
+        let mut msg = self.user_session_receiver.try_recv();
+        if msg.is_ok() {
+            let mut active_user_sessions_guard = self.active_user_sessions.lock();
+            loop {
+                match msg {
+                    Ok(user_session_status) => {
+                        match user_session_status {
+                            UserSessionStatus::Activated { user } => {
+                                active_user_sessions_guard.insert(user);
+                            }
+                            UserSessionStatus::Deactivated { user } => {
+                                active_user_sessions_guard.remove(&user);
+                            }
                         }
                     }
+                    Err(_) => {
+                        break;
+                    }
                 }
-                Err(_) => {
-                    break;
-                }
+                msg = self.user_session_receiver.try_recv();
             }
         }
     }
