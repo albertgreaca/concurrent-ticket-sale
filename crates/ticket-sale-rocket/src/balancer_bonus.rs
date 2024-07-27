@@ -121,7 +121,7 @@ impl RequestHandler for BalancerBonus {
 
                 *self.no_rq.lock() += 1;
                 let customer = rq.customer_id();
-                if self.active_user_sessions.lock().contains(&customer) || *self.no_rq.lock() <= 300
+                if self.active_user_sessions.lock().contains(&customer) || *self.no_rq.lock() <= 50
                 {
                     match rq.server_id() {
                         // Request already has a server
