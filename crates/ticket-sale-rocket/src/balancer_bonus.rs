@@ -28,6 +28,7 @@ pub struct BalancerBonus {
 
     active_user_sessions: Mutex<HashSet<Uuid>>,
     user_session_receiver: Receiver<UserSessionStatus>,
+    no_rq: Mutex<u32>,
 }
 
 impl BalancerBonus {
@@ -45,6 +46,7 @@ impl BalancerBonus {
             server_sender: DashMap::new(),
             active_user_sessions: Mutex::new(HashSet::new()),
             user_session_receiver,
+            no_rq: Mutex::new(0),
         }
     }
 
@@ -117,8 +119,10 @@ impl RequestHandler for BalancerBonus {
             _ => {
                 self.update_active_user_sessions();
 
+                *self.no_rq.lock() += 1;
                 let customer = rq.customer_id();
-                if self.active_user_sessions.lock().contains(&customer) {
+                if self.active_user_sessions.lock().contains(&customer) || *self.no_rq.lock() <= 300
+                {
                     match rq.server_id() {
                         // Request already has a server
                         Some(server) => {
