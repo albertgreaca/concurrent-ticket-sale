@@ -53,7 +53,7 @@ pub fn launch(config: &Config) -> Balancer {
     let (estimator_scaling_sender, estimator_scaling_receiver) = unbounded();
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
 
-    if config.bonus {
+    if !config.bonus {
         let (estimator_tickets_sender, estimator_tickets_receiver) = mpsc::channel();
         let (estimator_scaling_sender, estimator_scaling_receiver) = mpsc::channel();
         // Create the coordinator and scale to initial number of servers
@@ -84,7 +84,7 @@ pub fn launch(config: &Config) -> Balancer {
             BalancerStandard::new(coordinator, estimator_shutdown_sender, estimator_thread);
 
         // Create the balancer
-        Balancer::new(Some(balancer_standard), None, true)
+        Balancer::new(Some(balancer_standard), None, false)
     } else {
         let (user_session_sender, user_session_receiver) = unbounded();
         // Create the coordinator and scale to initial number of servers
@@ -120,6 +120,6 @@ pub fn launch(config: &Config) -> Balancer {
         );
 
         // Create the balancer
-        Balancer::new(None, Some(balancer_bonus), false)
+        Balancer::new(None, Some(balancer_bonus), true)
     }
 }
