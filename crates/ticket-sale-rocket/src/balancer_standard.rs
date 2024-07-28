@@ -102,6 +102,7 @@ impl RequestHandler for BalancerStandard {
         }
     }
 
+    /// Shut down the system
     fn shutdown(self) {
         // Tell the estimator to shut down
         let _ = self.estimator_shutdown_sender.send(());

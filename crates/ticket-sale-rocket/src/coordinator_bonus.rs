@@ -1,20 +1,21 @@
 //! Implementation of the bonus coordinator
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::mpsc::channel;
+use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 
-use crossbeam::channel::{unbounded, Receiver, Sender};
+use crossbeam::channel::{unbounded, Sender};
 use parking_lot::Mutex;
 use rand::Rng;
 use ticket_sale_core::Request;
 use uuid::Uuid;
 
 use super::database::Database;
+use super::enums::EstimatorServerStatus;
+use super::enums::HighPriorityServerRequest;
+use super::enums::UserSessionStatus;
 use super::server_bonus::ServerBonus;
-use super::serverrequest::HighPriorityServerRequest;
-use super::serverstatus::EstimatorServerStatus;
-use crate::serverstatus::UserSessionStatus;
 /// Coordinator orchestrating all the components of the system
 pub struct CoordinatorBonus {
     database: Arc<Mutex<Database>>,
@@ -36,15 +37,16 @@ pub struct CoordinatorBonus {
     thread_list: Vec<JoinHandle<()>>,
 
     /// Channel for notifying the coordinator of each server's termination
-    coordinator_terminated_sender: Sender<Uuid>,
-    coordinator_terminated_receiver: Receiver<Uuid>,
+    coordinator_terminated_sender: mpsc::Sender<Uuid>,
+    coordinator_terminated_receiver: mpsc::Receiver<Uuid>,
 
     /// Sender for servers to send their number of tickets to the estimator
-    estimator_tickets_sender: Sender<u32>,
+    estimator_tickets_sender: mpsc::Sender<u32>,
 
     /// Sender for servers to notify the estimator of their activation/termination
-    estimator_scaling_sender: Sender<EstimatorServerStatus>,
+    estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
 
+    /// Sender for notifying the balancer of the started/ended user sessions
     user_session_sender: Sender<UserSessionStatus>,
 }
 
@@ -53,11 +55,11 @@ impl CoordinatorBonus {
     pub fn new(
         database: Arc<Mutex<Database>>,
         reservation_timeout: u32,
-        estimator_tickets_sender: Sender<u32>,
-        estimator_scaling_sender: Sender<EstimatorServerStatus>,
+        estimator_tickets_sender: mpsc::Sender<u32>,
+        estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
         user_session_sender: Sender<UserSessionStatus>,
     ) -> Self {
-        let (coordinator_terminated_sender, coordinator_terminated_receiver) = unbounded();
+        let (coordinator_terminated_sender, coordinator_terminated_receiver) = channel();
         Self {
             database,
             reservation_timeout,

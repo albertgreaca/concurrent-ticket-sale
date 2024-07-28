@@ -1,16 +1,6 @@
 use crossbeam::channel::Sender;
 use uuid::Uuid;
 
-use crate::serverrequest::HighPriorityServerRequest;
-
-#[derive(PartialEq)]
-pub enum ServerStatus {
-    Active,
-    Terminating,
-    Terminated,
-    Shutdown,
-}
-
 pub enum EstimatorServerStatus {
     Activated {
         server: Uuid,
@@ -19,6 +9,21 @@ pub enum EstimatorServerStatus {
     Deactivated {
         server: Uuid,
     },
+}
+
+pub enum HighPriorityServerRequest {
+    Activate,
+    Deactivate,
+    Shutdown,
+    Estimate { tickets: u32 },
+}
+
+#[derive(PartialEq)]
+pub enum ServerStatus {
+    Active,
+    Terminating,
+    Terminated,
+    Shutdown,
 }
 
 pub enum UserSessionStatus {

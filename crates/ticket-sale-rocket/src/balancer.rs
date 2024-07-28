@@ -45,7 +45,7 @@ impl RequestHandler for Balancer {
         }
     }
 
-    /// Shutdown the system
+    /// Shut down the system
     fn shutdown(self) {
         // Forward to the appropriate balancer
         if !self.bonus {

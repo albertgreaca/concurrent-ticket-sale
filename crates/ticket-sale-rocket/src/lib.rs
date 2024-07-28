@@ -26,12 +26,11 @@ mod balancer_standard;
 mod coordinator_bonus;
 mod coordinator_standard;
 mod database;
+mod enums;
 mod estimator_bonus;
 mod estimator_standard;
 mod server_bonus;
 mod server_standard;
-mod serverrequest;
-mod serverstatus;
 
 pub use balancer::Balancer;
 use coordinator_bonus::CoordinatorBonus;
@@ -49,13 +48,11 @@ pub fn launch(config: &Config) -> Balancer {
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
     // Create estimator channels
-    let (estimator_tickets_sender, estimator_tickets_receiver) = unbounded();
-    let (estimator_scaling_sender, estimator_scaling_receiver) = unbounded();
+    let (estimator_tickets_sender, estimator_tickets_receiver) = mpsc::channel();
+    let (estimator_scaling_sender, estimator_scaling_receiver) = mpsc::channel();
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
 
     if !config.bonus {
-        let (estimator_tickets_sender, estimator_tickets_receiver) = mpsc::channel();
-        let (estimator_scaling_sender, estimator_scaling_receiver) = mpsc::channel();
         // Create the coordinator and scale to initial number of servers
         let coordinator = Arc::new(Mutex::new(CoordinatorStandard::new(
             database.clone(),
@@ -86,7 +83,9 @@ pub fn launch(config: &Config) -> Balancer {
         // Create the balancer
         Balancer::new(Some(balancer_standard), None, false)
     } else {
+        // Create the user session channel
         let (user_session_sender, user_session_receiver) = unbounded();
+
         // Create the coordinator and scale to initial number of servers
         let coordinator = Arc::new(Mutex::new(CoordinatorBonus::new(
             database.clone(),

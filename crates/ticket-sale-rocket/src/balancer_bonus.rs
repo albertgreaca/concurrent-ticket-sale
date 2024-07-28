@@ -12,7 +12,7 @@ use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
 use super::coordinator_bonus::CoordinatorBonus;
-use crate::serverstatus::UserSessionStatus;
+use super::enums::UserSessionStatus;
 
 pub struct BalancerBonus {
     coordinator: Arc<Mutex<CoordinatorBonus>>,
@@ -26,8 +26,14 @@ pub struct BalancerBonus {
     // Maps from server id to its low priority sender
     server_sender: DashMap<Uuid, Sender<Request>>,
 
+    // List of users with an active session
     active_user_sessions: Mutex<HashSet<Uuid>>,
+
+    // Receiver for which users start/end a session
     user_session_receiver: Receiver<UserSessionStatus>,
+
+    // Number of customer requests so far
+    no_rq: Mutex<u32>,
 }
 
 impl BalancerBonus {
@@ -45,6 +51,7 @@ impl BalancerBonus {
             server_sender: DashMap::new(),
             active_user_sessions: Mutex::new(HashSet::new()),
             user_session_receiver,
+            no_rq: Mutex::new(0),
         }
     }
 
@@ -61,11 +68,14 @@ impl BalancerBonus {
         (server, sender)
     }
 
+    /// Update the set of active user sessions
     fn update_active_user_sessions(&self) {
         let mut active_user_sessions_guard = self.active_user_sessions.lock();
         loop {
+            // While there is an update
             match self.user_session_receiver.try_recv() {
                 Ok(user_session_status) => {
+                    // Add or remove the user
                     match user_session_status {
                         UserSessionStatus::Activated { user } => {
                             active_user_sessions_guard.insert(user);
@@ -115,9 +125,12 @@ impl RequestHandler for BalancerBonus {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
+                *self.no_rq.lock() += 1;
                 self.update_active_user_sessions();
                 let customer = rq.customer_id();
-                if self.active_user_sessions.lock().contains(&customer)
+
+                // User is in an active session => try to keep the same server
+                if self.active_user_sessions.lock().contains(&customer) || *self.no_rq.lock() <= 50
                 {
                     match rq.server_id() {
                         // Request already has a server
@@ -165,6 +178,7 @@ impl RequestHandler for BalancerBonus {
         }
     }
 
+    /// Shut down the system
     fn shutdown(self) {
         // Tell the estimator to shut down
         let _ = self.estimator_shutdown_sender.send(());

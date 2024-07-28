@@ -8,8 +8,8 @@ use parking_lot::Mutex;
 use uuid::Uuid;
 
 use super::database::Database;
-use super::serverrequest::HighPriorityServerRequest;
-use crate::serverstatus::EstimatorServerStatus;
+use super::enums::EstimatorServerStatus;
+use super::enums::HighPriorityServerRequest;
 
 /// Estimator that estimates the number of tickets available overall
 pub struct EstimatorStandard {

@@ -3,10 +3,12 @@
 #![allow(clippy::too_many_arguments)]
 use std::collections::HashMap;
 use std::collections::VecDeque;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::Receiver;
+use crossbeam::channel::Sender;
 use crossbeam::select;
 use parking_lot::Mutex;
 use ticket_sale_core::{Request, RequestKind};
@@ -14,10 +16,10 @@ use uuid::Uuid;
 
 use super::coordinator_bonus::CoordinatorBonus;
 use super::database::Database;
-use super::serverrequest::HighPriorityServerRequest;
-use super::serverstatus::EstimatorServerStatus;
-use super::serverstatus::ServerStatus;
-use crate::serverstatus::UserSessionStatus;
+use super::enums::EstimatorServerStatus;
+use super::enums::HighPriorityServerRequest;
+use super::enums::ServerStatus;
+use super::enums::UserSessionStatus;
 
 pub struct ServerBonus {
     /// The server's ID
@@ -49,13 +51,13 @@ pub struct ServerBonus {
     high_priority: Option<Receiver<HighPriorityServerRequest>>,
 
     /// Sender for notifying the coordinator of the server's termination
-    coordinator_terminated_sender: Sender<Uuid>,
+    coordinator_terminated_sender: mpsc::Sender<Uuid>,
 
     /// Sender for sending the server's number of tickets to the estimator
-    estimator_tickets_sender: Sender<u32>,
+    estimator_tickets_sender: mpsc::Sender<u32>,
 
     /// Sender for notifying the estimator of the server's termination
-    estimator_scaling_sender: Sender<EstimatorServerStatus>,
+    estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
 
     user_session_sender: Sender<UserSessionStatus>,
 }
@@ -68,9 +70,9 @@ impl ServerBonus {
         reservation_timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
-        coordinator_terminated_sender: Sender<Uuid>,
-        estimator_tickets_sender: Sender<u32>,
-        estimator_scaling_sender: Sender<EstimatorServerStatus>,
+        coordinator_terminated_sender: mpsc::Sender<Uuid>,
+        estimator_tickets_sender: mpsc::Sender<u32>,
+        estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
         user_session_sender: Sender<UserSessionStatus>,
     ) -> Self {
         let id = Uuid::new_v4();
@@ -138,12 +140,12 @@ impl ServerBonus {
 
                     // Drop the high priority receiver to prevent
                     // further requests from being sent
-                    let high_priority_channel = self.high_priority.take().unwrap();
-                    drop(high_priority_channel);
+                    let high_priority_receiver = self.high_priority.take().unwrap();
+                    drop(high_priority_receiver);
 
                     // Assign a new server to all low priority requests
-                    let low_priority_channel = self.low_priority.take().unwrap();
-                    while let Ok(mut rq) = low_priority_channel.try_recv() {
+                    let low_priority_receiver = self.low_priority.take().unwrap();
+                    while let Ok(mut rq) = low_priority_receiver.try_recv() {
                         let coordinator_guard = self.coordinator.lock();
                         let (x, _) = coordinator_guard.get_random_server_sender();
                         rq.set_server_id(x);
@@ -152,7 +154,7 @@ impl ServerBonus {
 
                     // Drop the low priority receiver to prevent
                     // further reuqests from begin sent
-                    drop(low_priority_channel);
+                    drop(low_priority_receiver);
 
                     // Terminate the server
                     break;
@@ -170,14 +172,14 @@ impl ServerBonus {
     /// Processes the next request
     /// giving priority to high priority requests
     pub fn process_request(&mut self) {
-        let high_priority_channel = self.get_high_priority_receiver();
-        match high_priority_channel.try_recv() {
+        let high_priority_receiver = self.get_high_priority_receiver();
+        match high_priority_receiver.try_recv() {
             Ok(rq) => {
                 self.process_high_priority(rq);
             }
             Err(_) => {
-                let low_priority_channel = self.get_low_priority_receiver();
-                match low_priority_channel.try_recv() {
+                let low_priority_receiver = self.get_low_priority_receiver();
+                match low_priority_receiver.try_recv() {
                     Ok(rq) => {
                         self.process_low_priority(rq);
                     }
@@ -192,11 +194,11 @@ impl ServerBonus {
 
     /// Waits for any request, then processes it
     pub fn wait_for_requests(&mut self) {
-        let high_priority_channel = self.get_high_priority_receiver();
-        let low_priority_channel = self.get_low_priority_receiver();
+        let high_priority_receiver = self.get_high_priority_receiver();
+        let low_priority_receiver = self.get_low_priority_receiver();
 
         select! {
-            recv(high_priority_channel) -> msg => {
+            recv(high_priority_receiver) -> msg => {
                 match msg {
                     Ok(rq) => {
                         self.process_high_priority(rq);
@@ -206,7 +208,7 @@ impl ServerBonus {
                     }
                 }
             }
-            recv(low_priority_channel) -> msg => {
+            recv(low_priority_receiver) -> msg => {
                 match msg {
                     Ok(rq) => {
                         self.process_low_priority(rq);
@@ -222,8 +224,8 @@ impl ServerBonus {
     /// Tries to process a high priority request
     /// returns true if there is one, false otherwise
     pub fn try_process_high_priority(&mut self) -> bool {
-        let high_priority_channel = self.get_high_priority_receiver();
-        if let Ok(rq) = high_priority_channel.try_recv() {
+        let high_priority_receiver = self.get_high_priority_receiver();
+        if let Ok(rq) = high_priority_receiver.try_recv() {
             self.process_high_priority(rq);
             true
         } else {
@@ -422,31 +424,35 @@ impl ServerBonus {
             let ticket = ticket_option.unwrap();
             let customer = rq.customer_id();
 
-            // Make sure the customer has a reservation
-            if self.reserved.contains_key(&customer) {
-                // And that it reserved that specific ticket
-                if self.reserved[&customer].0 == ticket {
-                    // Remove the reservation
-                    self.reserved.remove(&customer);
+            // Attempt to remove a reservation for this customer
+            let reservation = self.reserved.remove(&customer);
 
-                    // Terminate server if this was the last reservation and server was terminating
-                    if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
-                        self.status = ServerStatus::Terminated;
+            match reservation {
+                // Make sure the customer has a reservation
+                Some((reservation_ticket, time)) => {
+                    // And that it reserved that specific ticket
+                    if reservation_ticket == ticket {
+                        // Terminate server if this was the last reservation and server was
+                        // terminating
+                        if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
+                            self.status = ServerStatus::Terminated;
+                        }
+
+                        // Notify the balancer of the finished user session
+                        let _ = self
+                            .user_session_sender
+                            .send(UserSessionStatus::Deactivated { user: customer });
+
+                        rq.respond_with_int(ticket);
+                    } else {
+                        // Insert the reservation back so it can still be bought later
+                        self.reserved.insert(customer, (reservation_ticket, time));
+                        rq.respond_with_err(
+                            "Our error: Reservation not made for that ticket for buy request.",
+                        )
                     }
-
-                    // Notify the balancer of the finished user session
-                    let _ = self
-                        .user_session_sender
-                        .send(UserSessionStatus::Deactivated { user: customer });
-
-                    rq.respond_with_int(ticket);
-                } else {
-                    rq.respond_with_err(
-                        "Our error: Reservation not made for that ticket for buy request.",
-                    )
                 }
-            } else {
-                rq.respond_with_err("Our error: No reservation for buy request.")
+                None => rq.respond_with_err("Our error: No reservation for buy request."),
             }
         }
     }
@@ -462,38 +468,42 @@ impl ServerBonus {
             let ticket = ticket_option.unwrap();
             let customer = rq.customer_id();
 
-            // Make sure the customer has a reservation
-            if self.reserved.contains_key(&customer) {
-                // And that it reserved that specific ticket
-                if self.reserved[&customer].0 == ticket {
-                    // Remove the reservation
-                    self.reserved.remove(&customer);
+            // Attempt to remove a reservation for this customer
+            let reservation = self.reserved.remove(&customer);
 
-                    // Return ticket to non-reserved list or database
-                    if self.status == ServerStatus::Active {
-                        self.tickets.push(ticket);
+            match reservation {
+                // Make sure the customer has a reservation
+                Some((reservation_ticket, time)) => {
+                    // And that it reserved that specific ticket
+                    if reservation_ticket == ticket {
+                        // Return ticket to non-reserved list or database
+                        if self.status == ServerStatus::Active {
+                            self.tickets.push(ticket);
+                        } else {
+                            self.database.lock().deallocate(&[ticket]);
+                        }
+
+                        // Terminate server if this was the last reservation and server was
+                        // terminating
+                        if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
+                            self.status = ServerStatus::Terminated;
+                        }
+
+                        // Notify the balancer of the finished user session
+                        let _ = self
+                            .user_session_sender
+                            .send(UserSessionStatus::Deactivated { user: customer });
+
+                        rq.respond_with_int(ticket);
                     } else {
-                        self.database.lock().deallocate(&[ticket]);
+                        // Insert the reservation back so it can still be cancelled later
+                        self.reserved.insert(customer, (reservation_ticket, time));
+                        rq.respond_with_err(
+                            "Our error: Reservation not made for that ticket for buy request.",
+                        )
                     }
-
-                    // Terminate server if this was the last reservation and server was terminating
-                    if self.reserved.is_empty() && self.status == ServerStatus::Terminating {
-                        self.status = ServerStatus::Terminated;
-                    }
-
-                    // Notify the balancer of the finished user session
-                    let _ = self
-                        .user_session_sender
-                        .send(UserSessionStatus::Deactivated { user: customer });
-
-                    rq.respond_with_int(ticket);
-                } else {
-                    rq.respond_with_err(
-                        "Our error: Reservation not made for that ticket for cancel request.",
-                    )
                 }
-            } else {
-                rq.respond_with_err("Our error: No reservation for cancel request.")
+                None => rq.respond_with_err("Our error: No reservation for cancel request."),
             }
         }
     }

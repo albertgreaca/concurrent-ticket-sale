@@ -15,9 +15,9 @@ use uuid::Uuid;
 
 use super::coordinator_standard::CoordinatorStandard;
 use super::database::Database;
-use super::serverrequest::HighPriorityServerRequest;
-use super::serverstatus::EstimatorServerStatus;
-use super::serverstatus::ServerStatus;
+use super::enums::EstimatorServerStatus;
+use super::enums::HighPriorityServerRequest;
+use super::enums::ServerStatus;
 
 pub struct ServerStandard {
     /// The server's ID
@@ -134,12 +134,12 @@ impl ServerStandard {
 
                     // Drop the high priority receiver to prevent
                     // further requests from being sent
-                    let high_priority_channel = self.high_priority.take().unwrap();
-                    drop(high_priority_channel);
+                    let high_priority_receiver = self.high_priority.take().unwrap();
+                    drop(high_priority_receiver);
 
                     // Assign a new server to all low priority requests
-                    let low_priority_channel = self.low_priority.take().unwrap();
-                    while let Ok(mut rq) = low_priority_channel.try_recv() {
+                    let low_priority_receiver = self.low_priority.take().unwrap();
+                    while let Ok(mut rq) = low_priority_receiver.try_recv() {
                         let coordinator_guard = self.coordinator.lock();
                         let x = coordinator_guard.get_random_server();
                         rq.set_server_id(x);
@@ -148,7 +148,7 @@ impl ServerStandard {
 
                     // Drop the low priority receiver to prevent
                     // further reuqests from begin sent
-                    drop(low_priority_channel);
+                    drop(low_priority_receiver);
 
                     // Terminate the server
                     break;
@@ -166,14 +166,14 @@ impl ServerStandard {
     /// Processes the next request
     /// giving priority to high priority requests
     pub fn process_request(&mut self) {
-        let high_priority_channel = self.get_high_priority_receiver();
-        match high_priority_channel.try_recv() {
+        let high_priority_receiver = self.get_high_priority_receiver();
+        match high_priority_receiver.try_recv() {
             Ok(rq) => {
                 self.process_high_priority(rq);
             }
             Err(_) => {
-                let low_priority_channel = self.get_low_priority_receiver();
-                match low_priority_channel.try_recv() {
+                let low_priority_receiver = self.get_low_priority_receiver();
+                match low_priority_receiver.try_recv() {
                     Ok(rq) => {
                         self.process_low_priority(rq);
                     }
@@ -188,11 +188,11 @@ impl ServerStandard {
 
     /// Waits for any request, then processes it
     pub fn wait_for_requests(&mut self) {
-        let high_priority_channel = self.get_high_priority_receiver();
-        let low_priority_channel = self.get_low_priority_receiver();
+        let high_priority_receiver = self.get_high_priority_receiver();
+        let low_priority_receiver = self.get_low_priority_receiver();
 
         select! {
-            recv(high_priority_channel) -> msg => {
+            recv(high_priority_receiver) -> msg => {
                 match msg {
                     Ok(rq) => {
                         self.process_high_priority(rq);
@@ -202,7 +202,7 @@ impl ServerStandard {
                     }
                 }
             }
-            recv(low_priority_channel) -> msg => {
+            recv(low_priority_receiver) -> msg => {
                 match msg {
                     Ok(rq) => {
                         self.process_low_priority(rq);
@@ -218,8 +218,8 @@ impl ServerStandard {
     /// Tries to process a high priority request
     /// returns true if there is one, false otherwise
     pub fn try_process_high_priority(&mut self) -> bool {
-        let high_priority_channel = self.get_high_priority_receiver();
-        if let Ok(rq) = high_priority_channel.try_recv() {
+        let high_priority_receiver = self.get_high_priority_receiver();
+        if let Ok(rq) = high_priority_receiver.try_recv() {
             self.process_high_priority(rq);
             true
         } else {

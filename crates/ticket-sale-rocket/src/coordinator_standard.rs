@@ -12,9 +12,9 @@ use ticket_sale_core::Request;
 use uuid::Uuid;
 
 use super::database::Database;
+use super::enums::EstimatorServerStatus;
+use super::enums::HighPriorityServerRequest;
 use super::server_standard::ServerStandard;
-use super::serverrequest::HighPriorityServerRequest;
-use super::serverstatus::EstimatorServerStatus;
 /// Coordinator orchestrating all the components of the system
 pub struct CoordinatorStandard {
     database: Arc<Mutex<Database>>,
