@@ -122,7 +122,7 @@ impl RequestHandler for BalancerBonus {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                self.update_active_user_sessions();
+                //self.update_active_user_sessions();
 
                 let customer = rq.customer_id();
 
