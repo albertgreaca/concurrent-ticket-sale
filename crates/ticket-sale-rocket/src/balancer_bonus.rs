@@ -33,7 +33,7 @@ pub struct BalancerBonus {
     user_session_receiver: Receiver<UserSessionStatus>,
 
     // Number of customer requests so far
-    no_rq: Mutex<u32>,
+    customer_requests: DashMap<Uuid, u32>,
 }
 
 impl BalancerBonus {
@@ -51,7 +51,7 @@ impl BalancerBonus {
             server_sender: DashMap::new(),
             active_user_sessions: Mutex::new(HashSet::new()),
             user_session_receiver,
-            no_rq: Mutex::new(0),
+            customer_requests: DashMap::new(),
         }
     }
 
@@ -125,12 +125,18 @@ impl RequestHandler for BalancerBonus {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                *self.no_rq.lock() += 1;
                 self.update_active_user_sessions();
+
                 let customer = rq.customer_id();
+                if self.customer_requests.contains_key(&customer) {
+                    *self.customer_requests.get_mut(&customer).unwrap() += 1;
+                } else {
+                    self.customer_requests.insert(customer, 1);
+                }
 
                 // User is in an active session => try to keep the same server
-                if self.active_user_sessions.lock().contains(&customer) || *self.no_rq.lock() <= 50
+                if self.active_user_sessions.lock().contains(&customer)
+                    || *self.customer_requests.get(&customer).unwrap() <= 100
                 {
                     match rq.server_id() {
                         // Request already has a server
@@ -169,6 +175,7 @@ impl RequestHandler for BalancerBonus {
                         }
                     }
                 } else {
+                    *self.customer_requests.get_mut(&customer).unwrap() = 0;
                     // Assign a new server and forward the request to the server
                     let (server, sender) = self.get_server_sender();
                     rq.set_server_id(server);
