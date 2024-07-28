@@ -48,8 +48,8 @@ pub fn launch(config: &Config) -> Balancer {
     let database = Arc::new(Mutex::new(Database::new(config.tickets)));
 
     // Create estimator channels
-    let (estimator_tickets_sender, estimator_tickets_receiver) = mpsc::channel();
-    let (estimator_scaling_sender, estimator_scaling_receiver) = mpsc::channel();
+    let (estimator_tickets_sender, estimator_tickets_receiver) = unbounded();
+    let (estimator_scaling_sender, estimator_scaling_receiver) = unbounded();
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
 
     if !config.bonus {

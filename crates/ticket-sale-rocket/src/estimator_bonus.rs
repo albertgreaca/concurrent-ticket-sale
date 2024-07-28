@@ -3,7 +3,7 @@
 use std::sync::{mpsc, Arc};
 use std::{collections::HashMap, time::Duration};
 
-use crossbeam::channel::Sender;
+use crossbeam::channel::{Receiver, Sender};
 use parking_lot::Mutex;
 use uuid::Uuid;
 
@@ -25,10 +25,10 @@ pub struct EstimatorBonus {
     server_senders: HashMap<Uuid, Sender<HighPriorityServerRequest>>,
 
     /// Receiver for receiving the number of tickets from each server
-    estimator_tickets_receiver: mpsc::Receiver<u32>,
+    estimator_tickets_receiver: Receiver<u32>,
 
     /// Receiver for being notified of each server's activation/termination
-    estimator_scaling_receiver: mpsc::Receiver<EstimatorServerStatus>,
+    estimator_scaling_receiver: Receiver<EstimatorServerStatus>,
 
     /// Receiver for being told to shut down
     estimator_shutdown_receiver: mpsc::Receiver<()>,
@@ -39,8 +39,8 @@ impl EstimatorBonus {
     pub fn new(
         database: Arc<Mutex<Database>>,
         roundtrip_secs: u32,
-        estimator_tickets_receiver: mpsc::Receiver<u32>,
-        estimator_scaling_receiver: mpsc::Receiver<EstimatorServerStatus>,
+        estimator_tickets_receiver: Receiver<u32>,
+        estimator_scaling_receiver: Receiver<EstimatorServerStatus>,
         estimator_shutdown_receiver: mpsc::Receiver<()>,
     ) -> Self {
         Self {

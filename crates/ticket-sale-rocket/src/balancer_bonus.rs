@@ -32,7 +32,7 @@ pub struct BalancerBonus {
     // Receiver for which users start/end a session
     user_session_receiver: Receiver<UserSessionStatus>,
 
-    // Number of customer requests so far
+    // Number of requests per customer
     customer_requests: DashMap<Uuid, u32>,
 }
 
@@ -134,9 +134,9 @@ impl RequestHandler for BalancerBonus {
                     self.customer_requests.insert(customer, 1);
                 }
 
-                // User is in an active session => try to keep the same server
+                // User is in an active session or made few requests => try to keep the same server
                 if self.active_user_sessions.lock().contains(&customer)
-                    || *self.customer_requests.get(&customer).unwrap() <= 100
+                    || *self.customer_requests.get(&customer).unwrap() <= 1000
                 {
                     match rq.server_id() {
                         // Request already has a server

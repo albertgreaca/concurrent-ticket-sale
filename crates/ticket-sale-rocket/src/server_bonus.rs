@@ -3,7 +3,6 @@
 #![allow(clippy::too_many_arguments)]
 use std::collections::HashMap;
 use std::collections::VecDeque;
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -51,14 +50,15 @@ pub struct ServerBonus {
     high_priority: Option<Receiver<HighPriorityServerRequest>>,
 
     /// Sender for notifying the coordinator of the server's termination
-    coordinator_terminated_sender: mpsc::Sender<Uuid>,
+    coordinator_terminated_sender: Sender<Uuid>,
 
     /// Sender for sending the server's number of tickets to the estimator
-    estimator_tickets_sender: mpsc::Sender<u32>,
+    estimator_tickets_sender: Sender<u32>,
 
     /// Sender for notifying the estimator of the server's termination
-    estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
+    estimator_scaling_sender: Sender<EstimatorServerStatus>,
 
+    /// Sender for notifying the balancer of the started/ended user sessions
     user_session_sender: Sender<UserSessionStatus>,
 }
 
@@ -70,9 +70,9 @@ impl ServerBonus {
         reservation_timeout: u32,
         low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
-        coordinator_terminated_sender: mpsc::Sender<Uuid>,
-        estimator_tickets_sender: mpsc::Sender<u32>,
-        estimator_scaling_sender: mpsc::Sender<EstimatorServerStatus>,
+        coordinator_terminated_sender: Sender<Uuid>,
+        estimator_tickets_sender: Sender<u32>,
+        estimator_scaling_sender: Sender<EstimatorServerStatus>,
         user_session_sender: Sender<UserSessionStatus>,
     ) -> Self {
         let id = Uuid::new_v4();
