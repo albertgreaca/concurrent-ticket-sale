@@ -8,6 +8,7 @@ use std::thread::JoinHandle;
 use crossbeam::channel::{Receiver, Sender};
 use dashmap::DashMap;
 use parking_lot::Mutex;
+use rand::Rng;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
@@ -31,9 +32,6 @@ pub struct BalancerBonus {
 
     // Receiver for which users start/end a session
     user_session_receiver: Receiver<UserSessionStatus>,
-
-    // Number of requests per customer
-    customer_requests: DashMap<Uuid, u32>,
 }
 
 impl BalancerBonus {
@@ -51,7 +49,6 @@ impl BalancerBonus {
             server_sender: DashMap::new(),
             active_user_sessions: Mutex::new(HashSet::new()),
             user_session_receiver,
-            customer_requests: DashMap::new(),
         }
     }
 
@@ -128,59 +125,54 @@ impl RequestHandler for BalancerBonus {
                 self.update_active_user_sessions();
 
                 let customer = rq.customer_id();
-                if self.customer_requests.contains_key(&customer) {
-                    *self.customer_requests.get_mut(&customer).unwrap() += 1;
-                } else {
-                    self.customer_requests.insert(customer, 1);
-                }
 
-                // User is in an active session or made few requests => try to keep the same server
-                //if self.active_user_sessions.lock().contains(&customer)
-                //    || *self.customer_requests.get(&customer).unwrap() <= 1000
-                //{
-                match rq.server_id() {
-                    // Request already has a server
-                    Some(server) => {
-                        // Get the low priority sender for this server
-                        let sender = if self.server_sender.contains_key(&server) {
-                            // If it is in the map, get it from there
-                            self.server_sender.get(&server).unwrap().clone()
-                        } else {
-                            // Otherwise, get it from the coordinator
-                            let aux = self.coordinator.lock().get_low_priority_sender(server);
-                            // And insert it in the map
-                            self.server_sender.insert(server, aux.clone());
-                            aux
-                        };
-                        // Attempt to forward the request
-                        let response = sender.send(rq);
+                let mut rng = rand::thread_rng();
+                let number = rng.gen_range(0..10000);
 
-                        match response {
-                            Ok(_) => {}
-                            Err(senderr) => {
-                                // Not forwarded => server terminated => assign new server
-                                let mut rq = senderr.into_inner();
-                                let (server, _) = self.get_server_sender();
-                                rq.set_server_id(server);
-                                rq.respond_with_err("Our error: Server no longer exists.")
+                // User is in an active session or unlucky => try to keep the same server
+                if self.active_user_sessions.lock().contains(&customer) || number >= 100 {
+                    match rq.server_id() {
+                        // Request already has a server
+                        Some(server) => {
+                            // Get the low priority sender for this server
+                            let sender = if self.server_sender.contains_key(&server) {
+                                // If it is in the map, get it from there
+                                self.server_sender.get(&server).unwrap().clone()
+                            } else {
+                                // Otherwise, get it from the coordinator
+                                let aux = self.coordinator.lock().get_low_priority_sender(server);
+                                // And insert it in the map
+                                self.server_sender.insert(server, aux.clone());
+                                aux
+                            };
+                            // Attempt to forward the request
+                            let response = sender.send(rq);
+
+                            match response {
+                                Ok(_) => {}
+                                Err(senderr) => {
+                                    // Not forwarded => server terminated => assign new server
+                                    let mut rq = senderr.into_inner();
+                                    let (server, _) = self.get_server_sender();
+                                    rq.set_server_id(server);
+                                    rq.respond_with_err("Our error: Server no longer exists.")
+                                }
                             }
                         }
+                        // Request doesn't have a server
+                        None => {
+                            // Assign a server and forward the request to the server
+                            let (server, sender) = self.get_server_sender();
+                            rq.set_server_id(server);
+                            let _ = sender.send(rq);
+                        }
                     }
-                    // Request doesn't have a server
-                    None => {
-                        // Assign a server and forward the request to the server
-                        let (server, sender) = self.get_server_sender();
-                        rq.set_server_id(server);
-                        let _ = sender.send(rq);
-                    }
+                } else {
+                    // Assign a new server and forward the request to the server
+                    let (server, sender) = self.get_server_sender();
+                    rq.set_server_id(server);
+                    let _ = sender.send(rq);
                 }
-                //} else {
-                //    *self.customer_requests.get_mut(&customer).unwrap() = 0;
-                //    // Assign a new server and forward the request to the server
-                //    let (server, sender) = self.get_server_sender();
-                //    rq.set_server_id(server);
-                //    let _ = sender.send(rq);
-                //}
             }
         }
     }
