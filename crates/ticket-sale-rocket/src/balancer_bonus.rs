@@ -1,6 +1,7 @@
 //! Implementation of the bonus balancer
 
 #![allow(clippy::while_let_loop)]
+use std::collections::HashSet;
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
@@ -24,16 +25,7 @@ pub struct BalancerBonus {
     estimator_thread: JoinHandle<()>,
 
     // Maps from server id to its low priority sender
-    server_sender: DashMap<Uuid, Sender<(Request, bool)>>,
-
-    // Number of requests per customer
-    no_requests: DashMap<Uuid, u32>,
-
-    // Mapped value is 0 => no user session
-    active_user_sessions: DashMap<Uuid, u32>,
-
-    // Receiver for which users start/end a session
-    user_session_receiver: Receiver<UserSessionStatus>,
+    server_sender: DashMap<Uuid, Sender<Request>>,
 }
 
 impl BalancerBonus {
@@ -42,21 +34,17 @@ impl BalancerBonus {
         coordinator: Arc<Mutex<CoordinatorBonus>>,
         estimator_shutdown_sender: mpsc::Sender<()>,
         estimator_thread: JoinHandle<()>,
-        user_session_receiver: Receiver<UserSessionStatus>,
     ) -> Self {
         Self {
             coordinator,
             estimator_shutdown_sender,
             estimator_thread,
             server_sender: DashMap::new(),
-            no_requests: DashMap::new(),
-            active_user_sessions: DashMap::new(),
-            user_session_receiver,
         }
     }
 
     /// Get the id and low priority sender of a random server
-    fn get_server_sender(&self) -> (Uuid, Sender<(Request, bool)>) {
+    fn get_server_sender(&self) -> (Uuid, Sender<Request>) {
         // Get the random pair from the coordinator
         let (server, sender) = self.coordinator.lock().get_random_server_sender();
 
@@ -66,34 +54,6 @@ impl BalancerBonus {
         }
 
         (server, sender)
-    }
-
-    /// Update the user sessions
-    fn update_active_user_sessions(&self) {
-        loop {
-            // While there is an update
-            match self.user_session_receiver.try_recv() {
-                Ok(user_session_status) => {
-                    // Add or remove the user
-                    match user_session_status {
-                        UserSessionStatus::Activated { user } => {
-                            self.active_user_sessions
-                                .entry(user)
-                                .and_modify(|value| *value += 1)
-                                .or_insert(1);
-                        }
-                        UserSessionStatus::Deactivated { user } => {
-                            self.active_user_sessions
-                                .entry(user)
-                                .and_modify(|value| *value -= 1);
-                        }
-                    }
-                }
-                Err(_) => {
-                    break;
-                }
-            }
-        }
     }
 }
 
@@ -129,20 +89,6 @@ impl RequestHandler for BalancerBonus {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                //self.update_active_user_sessions();
-
-                let customer = rq.customer_id();
-
-                self.no_requests
-                    .entry(customer)
-                    .and_modify(|value| *value += 1)
-                    .or_insert(1);
-
-                let mut rng = rand::thread_rng();
-                let number = rng.gen_range(0..10000);
-
-                // User is in an active session or unlucky => try to keep the same server
-                //if self.active_user_sessions.lock().contains(&customer) || number >= 100 {
                 match rq.server_id() {
                     // Request already has a server
                     Some(server) => {
@@ -158,16 +104,13 @@ impl RequestHandler for BalancerBonus {
                             aux
                         };
                         // Attempt to forward the request
-                        let response = if *self.no_requests.get(&customer).unwrap() <= 100 {
-                            sender.send((rq, false))
-                        } else {
-                            sender.send((rq, true))
-                        };
+                        let response = sender.send(rq);
+
                         match response {
                             Ok(_) => {}
                             Err(senderr) => {
                                 // Not forwarded => server terminated => assign new server
-                                let mut rq = senderr.into_inner().0;
+                                let mut rq = senderr.into_inner();
                                 let (server, _) = self.get_server_sender();
                                 rq.set_server_id(server);
                                 rq.respond_with_err("Our error: Server no longer exists.")
@@ -179,19 +122,9 @@ impl RequestHandler for BalancerBonus {
                         // Assign a server and forward the request to the server
                         let (server, sender) = self.get_server_sender();
                         rq.set_server_id(server);
-                        let _ = if *self.no_requests.get(&customer).unwrap() <= 100 {
-                            sender.send((rq, false))
-                        } else {
-                            sender.send((rq, true))
-                        };
+                        let _ = sender.send(rq);
                     }
                 }
-                //} else {
-                //    // Assign a new server and forward the request to the server
-                //    let (server, sender) = self.get_server_sender();
-                //    rq.set_server_id(server);
-                //    let _ = sender.send(rq);
-                //}
             }
         }
     }

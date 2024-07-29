@@ -2,6 +2,7 @@
 
 #![allow(clippy::too_many_arguments)]
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Instant;
@@ -40,13 +41,13 @@ pub struct ServerBonus {
     reserved: HashMap<Uuid, (u32, Instant)>,
 
     /// Queue of reservations as (customer id, time of reservation)
-    timeout_queue: VecDeque<(Uuid, Instant, bool)>,
+    timeout_queue: VecDeque<(Uuid, Instant)>,
 
     /// The reservation timeout
     reservation_timeout: u32,
 
     /// Receivers for receiving requests
-    low_priority: Option<Receiver<(Request, bool)>>,
+    low_priority: Option<Receiver<Request>>,
     high_priority: Option<Receiver<HighPriorityServerRequest>>,
 
     /// Sender for notifying the coordinator of the server's termination
@@ -58,8 +59,7 @@ pub struct ServerBonus {
     /// Sender for notifying the estimator of the server's termination
     estimator_scaling_sender: Sender<EstimatorServerStatus>,
 
-    /// Sender for notifying the balancer of the started/ended user sessions
-    user_session_sender: Sender<UserSessionStatus>,
+    active_user_sessions: HashSet<Uuid>,
 }
 
 impl ServerBonus {
@@ -68,12 +68,11 @@ impl ServerBonus {
         database: Arc<Mutex<Database>>,
         coordinator: Arc<Mutex<CoordinatorBonus>>,
         reservation_timeout: u32,
-        low_priority: Receiver<(Request, bool)>,
+        low_priority: Receiver<Request>,
         high_priority: Receiver<HighPriorityServerRequest>,
         coordinator_terminated_sender: Sender<Uuid>,
         estimator_tickets_sender: Sender<u32>,
         estimator_scaling_sender: Sender<EstimatorServerStatus>,
-        user_session_sender: Sender<UserSessionStatus>,
     ) -> Self {
         let id = Uuid::new_v4();
         Self {
@@ -91,12 +90,12 @@ impl ServerBonus {
             coordinator_terminated_sender,
             estimator_tickets_sender,
             estimator_scaling_sender,
-            user_session_sender,
+            active_user_sessions: HashSet::new(),
         }
     }
 
     /// Get the receiver for low priority requests
-    pub fn get_low_priority_receiver(&self) -> &Receiver<(Request, bool)> {
+    pub fn get_low_priority_receiver(&self) -> &Receiver<Request> {
         match &self.low_priority {
             Some(value) => value,
             None => {
@@ -145,7 +144,7 @@ impl ServerBonus {
 
                     // Assign a new server to all low priority requests
                     let low_priority_receiver = self.low_priority.take().unwrap();
-                    while let Ok((mut rq, _)) = low_priority_receiver.try_recv() {
+                    while let Ok(mut rq) = low_priority_receiver.try_recv() {
                         let coordinator_guard = self.coordinator.lock();
                         let (x, _) = coordinator_guard.get_random_server_sender();
                         rq.set_server_id(x);
@@ -180,8 +179,8 @@ impl ServerBonus {
             Err(_) => {
                 let low_priority_receiver = self.get_low_priority_receiver();
                 match low_priority_receiver.try_recv() {
-                    Ok((rq, high_load)) => {
-                        self.process_low_priority((rq, high_load));
+                    Ok(rq) => {
+                        self.process_low_priority(rq);
                     }
                     Err(_) => {
                         // Avoid busy wait
@@ -289,7 +288,6 @@ impl ServerBonus {
             // Get customer and time of reservation
             let customer = self.timeout_queue.front().unwrap().0;
             let time = self.timeout_queue.front().unwrap().1;
-            let high_load = self.timeout_queue.front().unwrap().2;
             self.timeout_queue.pop_front();
 
             // If reservation still exists
@@ -306,12 +304,7 @@ impl ServerBonus {
                 // Remove reservation
                 self.reserved.remove(&customer);
 
-                if high_load {
-                    // Notify the balancer of the finished user session
-                    let _ = self
-                        .user_session_sender
-                        .send(UserSessionStatus::Deactivated { user: customer });
-                }
+                self.active_user_sessions.remove(&customer);
             }
         }
         drop(database_guard);
@@ -335,9 +328,7 @@ impl ServerBonus {
     }
 
     /// Processes a given low priority request
-    pub fn process_low_priority(&mut self, aux: (Request, bool)) {
-        let rq = aux.0;
-        let high_load = aux.1;
+    pub fn process_low_priority(&mut self, rq: Request) {
         // Remove reservations that have timed out
         self.remove_timeouted_reservations();
 
@@ -346,13 +337,13 @@ impl ServerBonus {
                 rq.respond_with_int(self.get_available_tickets());
             }
             RequestKind::ReserveTicket => {
-                self.process_reservation((rq, high_load));
+                self.process_reservation(rq);
             }
             RequestKind::BuyTicket => {
-                self.process_buy((rq, high_load));
+                self.process_buy(rq);
             }
             RequestKind::AbortPurchase => {
-                self.process_cancel((rq, high_load));
+                self.process_cancel(rq);
             }
             _ => {
                 rq.respond_with_err("Our error: RequestKind not found.");
@@ -366,9 +357,7 @@ impl ServerBonus {
     }
 
     /// Process a reservation request
-    pub fn process_reservation(&mut self, aux: (Request, bool)) {
-        let mut rq = aux.0;
-        let mut high_load = aux.1;
+    pub fn process_reservation(&mut self, mut rq: Request) {
         // Get the customer id and check if he already has a reservation
         let customer = rq.customer_id();
         if self.reserved.contains_key(&customer) {
@@ -410,22 +399,15 @@ impl ServerBonus {
         let ticket = self.tickets.pop().unwrap();
         let time = Instant::now();
         self.reserved.insert(customer, (ticket, time));
-        self.timeout_queue.push_back((customer, time, high_load));
+        self.timeout_queue.push_back((customer, time));
 
-        if high_load {
-            // Notify the balancer of the started user session
-            let _ = self
-                .user_session_sender
-                .send(UserSessionStatus::Activated { user: customer });
-        }
+        self.active_user_sessions.insert(customer);
 
         rq.respond_with_int(ticket);
     }
 
     /// Process a buy request
-    pub fn process_buy(&mut self, aux: (Request, bool)) {
-        let mut rq = aux.0;
-        let mut high_load = aux.1;
+    pub fn process_buy(&mut self, mut rq: Request) {
         // Make sure the request has a ticket id
         let ticket_option = rq.read_u32();
         if ticket_option.is_none() {
@@ -449,12 +431,7 @@ impl ServerBonus {
                             self.status = ServerStatus::Terminated;
                         }
 
-                        if high_load {
-                            // Notify the balancer of the finished user session
-                            let _ = self
-                                .user_session_sender
-                                .send(UserSessionStatus::Deactivated { user: customer });
-                        }
+                        self.active_user_sessions.remove(&customer);
 
                         rq.respond_with_int(ticket);
                     } else {
@@ -471,9 +448,7 @@ impl ServerBonus {
     }
 
     /// Process a cancel request
-    pub fn process_cancel(&mut self, aux: (Request, bool)) {
-        let mut rq = aux.0;
-        let mut high_load = aux.1;
+    pub fn process_cancel(&mut self, mut rq: Request) {
         // Make sure the request has a ticket id
         let ticket_option = rq.read_u32();
         if ticket_option.is_none() {
@@ -504,12 +479,7 @@ impl ServerBonus {
                             self.status = ServerStatus::Terminated;
                         }
 
-                        if high_load {
-                            // Notify the balancer of the finished user session
-                            let _ = self
-                                .user_session_sender
-                                .send(UserSessionStatus::Deactivated { user: customer });
-                        }
+                        self.active_user_sessions.remove(&customer);
 
                         rq.respond_with_int(ticket);
                     } else {

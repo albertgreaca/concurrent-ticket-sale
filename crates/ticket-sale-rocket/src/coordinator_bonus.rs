@@ -31,7 +31,7 @@ pub struct CoordinatorBonus {
     /// Lists containing the id, sender for low/high priority requests and thread for each
     /// server
     pub server_id_list: Vec<Uuid>,
-    pub low_priority_sender_list: Vec<Sender<(Request, bool)>>,
+    pub low_priority_sender_list: Vec<Sender<Request>>,
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,
 
@@ -44,9 +44,6 @@ pub struct CoordinatorBonus {
 
     /// Sender for servers to notify the estimator of their activation/termination
     estimator_scaling_sender: Sender<EstimatorServerStatus>,
-
-    /// Sender for notifying the balancer of the started/ended user sessions
-    user_session_sender: Sender<UserSessionStatus>,
 }
 
 impl CoordinatorBonus {
@@ -56,7 +53,6 @@ impl CoordinatorBonus {
         reservation_timeout: u32,
         estimator_tickets_sender: Sender<u32>,
         estimator_scaling_sender: Sender<EstimatorServerStatus>,
-        user_session_sender: Sender<UserSessionStatus>,
     ) -> Self {
         let (coordinator_terminated_sender, coordinator_terminated_receiver) = unbounded();
         Self {
@@ -72,7 +68,6 @@ impl CoordinatorBonus {
             coordinator_terminated_receiver,
             estimator_tickets_sender,
             estimator_scaling_sender,
-            user_session_sender,
         }
     }
 
@@ -87,7 +82,7 @@ impl CoordinatorBonus {
     }
 
     /// Get the id and low priority sender of a random non-terminating server
-    pub fn get_random_server_sender(&self) -> (Uuid, Sender<(Request, bool)>) {
+    pub fn get_random_server_sender(&self) -> (Uuid, Sender<Request>) {
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0..self.no_active_servers) as usize;
         (
@@ -97,7 +92,7 @@ impl CoordinatorBonus {
     }
 
     /// Get the channel for sending user requests to the server with the given id
-    pub fn get_low_priority_sender(&self, id: Uuid) -> Sender<(Request, bool)> {
+    pub fn get_low_priority_sender(&self, id: Uuid) -> Sender<Request> {
         if self.map_id_index.contains_key(&id) {
             self.low_priority_sender_list[*self.map_id_index.get(&id).unwrap()].clone()
         } else {
@@ -178,7 +173,6 @@ impl CoordinatorBonus {
                     self.coordinator_terminated_sender.clone(),
                     self.estimator_tickets_sender.clone(),
                     self.estimator_scaling_sender.clone(),
-                    self.user_session_sender.clone(),
                 );
                 let server_id = server.id;
 
