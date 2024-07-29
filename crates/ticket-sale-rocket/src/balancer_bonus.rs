@@ -24,10 +24,13 @@ pub struct BalancerBonus {
     estimator_thread: JoinHandle<()>,
 
     // Maps from server id to its low priority sender
-    server_sender: DashMap<Uuid, Sender<Request>>,
+    server_sender: DashMap<Uuid, Sender<(Request, bool)>>,
+
+    // Number of requests per customer
+    no_requests: DashMap<Uuid, u32>,
 
     // Mapped value is 0 => no user session
-    active_user_sessions: DashMap<Uuid, i32>,
+    active_user_sessions: DashMap<Uuid, u32>,
 
     // Receiver for which users start/end a session
     user_session_receiver: Receiver<UserSessionStatus>,
@@ -46,13 +49,14 @@ impl BalancerBonus {
             estimator_shutdown_sender,
             estimator_thread,
             server_sender: DashMap::new(),
+            no_requests: DashMap::new(),
             active_user_sessions: DashMap::new(),
             user_session_receiver,
         }
     }
 
     /// Get the id and low priority sender of a random server
-    fn get_server_sender(&self) -> (Uuid, Sender<Request>) {
+    fn get_server_sender(&self) -> (Uuid, Sender<(Request, bool)>) {
         // Get the random pair from the coordinator
         let (server, sender) = self.coordinator.lock().get_random_server_sender();
 
@@ -81,8 +85,7 @@ impl BalancerBonus {
                         UserSessionStatus::Deactivated { user } => {
                             self.active_user_sessions
                                 .entry(user)
-                                .and_modify(|value| *value -= 1)
-                                .or_insert(-1);
+                                .and_modify(|value| *value -= 1);
                         }
                     }
                 }
@@ -130,6 +133,11 @@ impl RequestHandler for BalancerBonus {
 
                 let customer = rq.customer_id();
 
+                self.no_requests
+                    .entry(customer)
+                    .and_modify(|value| *value += 1)
+                    .or_insert(1);
+
                 let mut rng = rand::thread_rng();
                 let number = rng.gen_range(0..10000);
 
@@ -150,13 +158,16 @@ impl RequestHandler for BalancerBonus {
                             aux
                         };
                         // Attempt to forward the request
-                        let response = sender.send(rq);
-
+                        let response = if *self.no_requests.get(&customer).unwrap() <= 100 {
+                            sender.send((rq, false))
+                        } else {
+                            sender.send((rq, true))
+                        };
                         match response {
                             Ok(_) => {}
                             Err(senderr) => {
                                 // Not forwarded => server terminated => assign new server
-                                let mut rq = senderr.into_inner();
+                                let mut rq = senderr.into_inner().0;
                                 let (server, _) = self.get_server_sender();
                                 rq.set_server_id(server);
                                 rq.respond_with_err("Our error: Server no longer exists.")
@@ -168,7 +179,11 @@ impl RequestHandler for BalancerBonus {
                         // Assign a server and forward the request to the server
                         let (server, sender) = self.get_server_sender();
                         rq.set_server_id(server);
-                        let _ = sender.send(rq);
+                        let _ = if *self.no_requests.get(&customer).unwrap() <= 100 {
+                            sender.send((rq, false))
+                        } else {
+                            sender.send((rq, true))
+                        };
                     }
                 }
                 //} else {

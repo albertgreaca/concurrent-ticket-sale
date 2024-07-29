@@ -31,7 +31,7 @@ pub struct CoordinatorBonus {
     /// Lists containing the id, sender for low/high priority requests and thread for each
     /// server
     pub server_id_list: Vec<Uuid>,
-    pub low_priority_sender_list: Vec<Sender<Request>>,
+    pub low_priority_sender_list: Vec<Sender<(Request, bool)>>,
     high_priority_sender_list: Vec<Sender<HighPriorityServerRequest>>,
     thread_list: Vec<JoinHandle<()>>,
 
@@ -87,7 +87,7 @@ impl CoordinatorBonus {
     }
 
     /// Get the id and low priority sender of a random non-terminating server
-    pub fn get_random_server_sender(&self) -> (Uuid, Sender<Request>) {
+    pub fn get_random_server_sender(&self) -> (Uuid, Sender<(Request, bool)>) {
         let mut rng = rand::thread_rng();
         let index = rng.gen_range(0..self.no_active_servers) as usize;
         (
@@ -97,7 +97,7 @@ impl CoordinatorBonus {
     }
 
     /// Get the channel for sending user requests to the server with the given id
-    pub fn get_low_priority_sender(&self, id: Uuid) -> Sender<Request> {
+    pub fn get_low_priority_sender(&self, id: Uuid) -> Sender<(Request, bool)> {
         if self.map_id_index.contains_key(&id) {
             self.low_priority_sender_list[*self.map_id_index.get(&id).unwrap()].clone()
         } else {
