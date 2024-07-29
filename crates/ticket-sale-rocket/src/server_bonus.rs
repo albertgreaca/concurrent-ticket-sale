@@ -11,6 +11,7 @@ use crossbeam::channel::Receiver;
 use crossbeam::channel::Sender;
 use crossbeam::select;
 use parking_lot::Mutex;
+use rand::Rng;
 use ticket_sale_core::{Request, RequestKind};
 use uuid::Uuid;
 
@@ -328,9 +329,21 @@ impl ServerBonus {
     }
 
     /// Processes a given low priority request
-    pub fn process_low_priority(&mut self, rq: Request) {
+    pub fn process_low_priority(&mut self, mut rq: Request) {
         // Remove reservations that have timed out
         self.remove_timeouted_reservations();
+
+        let customer = rq.customer_id();
+        let mut rng = rand::thread_rng();
+        let number = rng.gen_range(0..10000);
+
+        if !self.active_user_sessions.contains(&customer) && number <= 100 {
+            let coordinator_guard = self.coordinator.lock();
+            let (server, sender) = coordinator_guard.get_random_server_sender();
+            rq.set_server_id(server);
+            let _ = sender.send(rq);
+            return;
+        }
 
         match rq.kind() {
             RequestKind::NumAvailableTickets => {
