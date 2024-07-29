@@ -346,7 +346,7 @@ impl ServerBonus {
 
         // if not in an active session and many requests => reassign server
         if !self.active_user_sessions.contains(&customer)
-            && *self.no_requests.get(&customer).unwrap() > 50
+            && *self.no_requests.get(&customer).unwrap() > 100
         {
             *self.no_requests.get_mut(&customer).unwrap() = 0;
 
