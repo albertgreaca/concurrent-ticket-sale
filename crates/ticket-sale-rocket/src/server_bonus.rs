@@ -339,7 +339,7 @@ impl ServerBonus {
         let number = rng.gen_range(0..10000);
 
         // if not in an active session and lucky => reassign server
-        if !self.active_user_sessions.contains(&customer) && number <= 100 {
+        if !self.active_user_sessions.contains(&customer) && number <= 150 {
             let coordinator_guard = self.coordinator.lock();
             let (server, sender) = coordinator_guard.get_random_server_sender();
             rq.set_server_id(server);
