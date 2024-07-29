@@ -61,9 +61,6 @@ pub struct ServerBonus {
 
     // List of users currently in an active session
     active_user_sessions: HashSet<Uuid>,
-
-    // Number of user requests
-    no_requests: HashMap<Uuid, u32>,
 }
 
 impl ServerBonus {
@@ -95,7 +92,6 @@ impl ServerBonus {
             estimator_tickets_sender,
             estimator_scaling_sender,
             active_user_sessions: HashSet::new(),
-            no_requests: HashMap::new(),
         }
     }
 
@@ -339,20 +335,13 @@ impl ServerBonus {
         self.remove_timeouted_reservations();
 
         let customer = rq.customer_id();
-        self.no_requests
-            .entry(customer)
-            .and_modify(|value| *value += 1)
-            .or_insert(1);
+        let mut rng = rand::thread_rng();
+        let number = rng.gen_range(0..10000);
 
-        // if not in an active session and many requests => reassign server
-        if !self.active_user_sessions.contains(&customer)
-            && *self.no_requests.get(&customer).unwrap() > 150
-        {
-            *self.no_requests.get_mut(&customer).unwrap() = 0;
-
+        // if not in an active session and lucky => reassign server
+        if !self.active_user_sessions.contains(&customer) && number <= 100 {
             let coordinator_guard = self.coordinator.lock();
             let (server, sender) = coordinator_guard.get_random_server_sender();
-
             rq.set_server_id(server);
             let _ = sender.send(rq);
             return;
