@@ -52,7 +52,7 @@ pub fn launch(config: &Config) -> Balancer {
     let (estimator_scaling_sender, estimator_scaling_receiver) = unbounded();
     let (estimator_shutdown_sender, estimator_shutdown_receiver) = mpsc::channel();
 
-    if config.bonus {
+    if !config.bonus {
         // Create the coordinator and scale to initial number of servers
         let coordinator = Arc::new(Mutex::new(CoordinatorStandard::new(
             database.clone(),
@@ -81,7 +81,7 @@ pub fn launch(config: &Config) -> Balancer {
             BalancerStandard::new(coordinator, estimator_shutdown_sender, estimator_thread);
 
         // Create the balancer
-        Balancer::new(Some(balancer_standard), None, true)
+        Balancer::new(Some(balancer_standard), None, false)
     } else {
         // Create the coordinator and scale to initial number of servers
         let coordinator = Arc::new(Mutex::new(CoordinatorBonus::new(
@@ -111,6 +111,6 @@ pub fn launch(config: &Config) -> Balancer {
             BalancerBonus::new(coordinator, estimator_shutdown_sender, estimator_thread);
 
         // Create the balancer
-        Balancer::new(None, Some(balancer_bonus), false)
+        Balancer::new(None, Some(balancer_bonus), true)
     }
 }

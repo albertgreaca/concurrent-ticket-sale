@@ -13,7 +13,6 @@ use uuid::Uuid;
 use super::database::Database;
 use super::enums::EstimatorServerStatus;
 use super::enums::HighPriorityServerRequest;
-use super::enums::UserSessionStatus;
 use super::server_bonus::ServerBonus;
 /// Coordinator orchestrating all the components of the system
 pub struct CoordinatorBonus {

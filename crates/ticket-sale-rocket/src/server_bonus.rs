@@ -20,7 +20,6 @@ use super::database::Database;
 use super::enums::EstimatorServerStatus;
 use super::enums::HighPriorityServerRequest;
 use super::enums::ServerStatus;
-use super::enums::UserSessionStatus;
 
 pub struct ServerBonus {
     /// The server's ID
@@ -60,6 +59,7 @@ pub struct ServerBonus {
     /// Sender for notifying the estimator of the server's termination
     estimator_scaling_sender: Sender<EstimatorServerStatus>,
 
+    // List of users currently in an active session
     active_user_sessions: HashSet<Uuid>,
 }
 
@@ -305,6 +305,7 @@ impl ServerBonus {
                 // Remove reservation
                 self.reserved.remove(&customer);
 
+                // Remove active session for this customer
                 self.active_user_sessions.remove(&customer);
             }
         }
@@ -337,6 +338,7 @@ impl ServerBonus {
         let mut rng = rand::thread_rng();
         let number = rng.gen_range(0..10000);
 
+        // if not in an active session and lucky => reassign server
         if !self.active_user_sessions.contains(&customer) && number <= 100 {
             let coordinator_guard = self.coordinator.lock();
             let (server, sender) = coordinator_guard.get_random_server_sender();
@@ -414,6 +416,7 @@ impl ServerBonus {
         self.reserved.insert(customer, (ticket, time));
         self.timeout_queue.push_back((customer, time));
 
+        // Add active session for this customer
         self.active_user_sessions.insert(customer);
 
         rq.respond_with_int(ticket);
@@ -444,6 +447,7 @@ impl ServerBonus {
                             self.status = ServerStatus::Terminated;
                         }
 
+                        // Remove active session for this customer
                         self.active_user_sessions.remove(&customer);
 
                         rq.respond_with_int(ticket);
@@ -492,6 +496,7 @@ impl ServerBonus {
                             self.status = ServerStatus::Terminated;
                         }
 
+                        // Remove active session for this customer
                         self.active_user_sessions.remove(&customer);
 
                         rq.respond_with_int(ticket);

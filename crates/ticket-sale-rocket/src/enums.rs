@@ -25,8 +25,3 @@ pub enum ServerStatus {
     Terminated,
     Shutdown,
 }
-
-pub enum UserSessionStatus {
-    Activated { user: Uuid },
-    Deactivated { user: Uuid },
-}

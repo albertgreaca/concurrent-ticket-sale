@@ -1,19 +1,16 @@
 //! Implementation of the bonus balancer
 
 #![allow(clippy::while_let_loop)]
-use std::collections::HashSet;
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
-use crossbeam::channel::{Receiver, Sender};
+use crossbeam::channel::Sender;
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use rand::Rng;
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
 use super::coordinator_bonus::CoordinatorBonus;
-use super::enums::UserSessionStatus;
 
 pub struct BalancerBonus {
     coordinator: Arc<Mutex<CoordinatorBonus>>,
