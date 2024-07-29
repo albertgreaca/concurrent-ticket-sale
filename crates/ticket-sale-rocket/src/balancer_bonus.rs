@@ -1,7 +1,6 @@
 //! Implementation of the bonus balancer
 
 #![allow(clippy::while_let_loop)]
-use std::collections::HashSet;
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
@@ -27,8 +26,8 @@ pub struct BalancerBonus {
     // Maps from server id to its low priority sender
     server_sender: DashMap<Uuid, Sender<Request>>,
 
-    // List of users with an active session
-    active_user_sessions: Mutex<HashSet<Uuid>>,
+    // Mapped value is 0 => no user session
+    active_user_sessions: DashMap<Uuid, i32>,
 
     // Receiver for which users start/end a session
     user_session_receiver: Receiver<UserSessionStatus>,
@@ -47,7 +46,7 @@ impl BalancerBonus {
             estimator_shutdown_sender,
             estimator_thread,
             server_sender: DashMap::new(),
-            active_user_sessions: Mutex::new(HashSet::new()),
+            active_user_sessions: DashMap::new(),
             user_session_receiver,
         }
     }
@@ -65,9 +64,8 @@ impl BalancerBonus {
         (server, sender)
     }
 
-    /// Update the set of active user sessions
+    /// Update the user sessions
     fn update_active_user_sessions(&self) {
-        let mut active_user_sessions_guard = self.active_user_sessions.lock();
         loop {
             // While there is an update
             match self.user_session_receiver.try_recv() {
@@ -75,10 +73,16 @@ impl BalancerBonus {
                     // Add or remove the user
                     match user_session_status {
                         UserSessionStatus::Activated { user } => {
-                            active_user_sessions_guard.insert(user);
+                            self.active_user_sessions
+                                .entry(user)
+                                .and_modify(|value| *value += 1)
+                                .or_insert(1);
                         }
                         UserSessionStatus::Deactivated { user } => {
-                            active_user_sessions_guard.remove(&user);
+                            self.active_user_sessions
+                                .entry(user)
+                                .and_modify(|value| *value -= 1)
+                                .or_insert(-1);
                         }
                     }
                 }
@@ -122,7 +126,7 @@ impl RequestHandler for BalancerBonus {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
-                //self.update_active_user_sessions();
+                self.update_active_user_sessions();
 
                 let customer = rq.customer_id();
 
