@@ -6,7 +6,7 @@ use std::thread::JoinHandle;
 
 use crossbeam::channel::Sender;
 use dashmap::DashMap;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard};
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
@@ -51,6 +51,20 @@ impl BalancerBonus {
         }
 
         (server, sender)
+    }
+
+    /// Forward a user request to a given server
+    fn send_to(&self, server: Uuid, mut rq: Request) {
+        // Get the low priority sender channel for the server
+        let sender = self.coordinator.lock().get_low_priority_sender(server);
+        // Send the request
+        let response = sender.send(rq);
+        if let Err(senderr) = response {
+            let mut rq = senderr.into_inner();
+            let (server, sender) = self.coordinator.lock().get_random_server_sender();
+            rq.set_server_id(server);
+            self.send_to(server, rq);
+        }
     }
 }
 
@@ -110,7 +124,7 @@ impl RequestHandler for BalancerBonus {
                                 let mut rq = senderr.into_inner();
                                 let (server, _) = self.get_server_sender();
                                 rq.set_server_id(server);
-                                rq.respond_with_err("Our error: Server no longer exists.")
+                                self.send_to(server, rq);
                             }
                         }
                     }
@@ -119,7 +133,7 @@ impl RequestHandler for BalancerBonus {
                         // Assign a server and forward the request to the server
                         let (server, sender) = self.get_server_sender();
                         rq.set_server_id(server);
-                        let _ = sender.send(rq);
+                        self.send_to(server, rq);
                     }
                 }
             }

@@ -37,13 +37,19 @@ impl BalancerStandard {
     fn send_to(
         &self,
         server: Uuid,
-        rq: Request,
+        mut rq: Request,
         coordinator_guard: MutexGuard<CoordinatorStandard>,
     ) {
         // Get the low priority sender channel for the server
         let sender = coordinator_guard.get_low_priority_sender(server);
         // Send the request
-        let _ = sender.send(rq);
+        let response = sender.send(rq);
+        if let Err(senderr) = response {
+            let mut rq = senderr.into_inner();
+            let server = coordinator_guard.get_random_server();
+            rq.set_server_id(server);
+            self.send_to(server, rq, coordinator_guard);
+        }
     }
 }
 
