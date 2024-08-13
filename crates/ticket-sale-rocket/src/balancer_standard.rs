@@ -3,7 +3,7 @@
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 
-use parking_lot::Mutex;
+use parking_lot::{Mutex, MutexGuard, RawMutex};
 use ticket_sale_core::{Request, RequestHandler, RequestKind};
 use uuid::Uuid;
 
@@ -34,9 +34,14 @@ impl BalancerStandard {
     }
 
     /// Forward a user request to a given server
-    fn send_to(&self, server: Uuid, rq: Request) {
+    fn send_to(
+        &self,
+        server: Uuid,
+        rq: Request,
+        coordinator_guard: MutexGuard<CoordinatorStandard>,
+    ) {
         // Get the low priority sender channel for the server
-        let sender = self.coordinator.lock().get_low_priority_sender(server);
+        let sender = coordinator_guard.get_low_priority_sender(server);
         // Send the request
         let _ = sender.send(rq);
     }
@@ -74,28 +79,29 @@ impl RequestHandler for BalancerStandard {
                 rq.respond_with_string("Happy Debugging! 🚫🐛");
             }
             _ => {
+                let mut coordinator_guard = self.coordinator.lock();
                 match rq.server_id() {
                     // Request already has a server
                     Some(server) => {
                         // Update non-terminating servers in the coordinator
-                        self.coordinator.lock().update_servers();
+                        coordinator_guard.update_servers();
                         // Make sure assigned server still exists afterwards
-                        if !self.coordinator.lock().map_id_index.contains_key(&server) {
+                        if !coordinator_guard.map_id_index.contains_key(&server) {
                             // If not, assign a new server and respond with error
-                            let new_server = self.coordinator.lock().get_random_server();
+                            let new_server = coordinator_guard.get_random_server();
                             rq.set_server_id(new_server);
                             rq.respond_with_err("Our error: Server no longer exists.");
                         } else {
                             // If yes, forward the request to the server
-                            self.send_to(server, rq);
+                            self.send_to(server, rq, coordinator_guard);
                         }
                     }
                     // Request doesn't have a server
                     None => {
                         // Assign a server and forward the request to the server
-                        let server = self.coordinator.lock().get_random_server();
+                        let server = coordinator_guard.get_random_server();
                         rq.set_server_id(server);
-                        self.send_to(server, rq);
+                        self.send_to(server, rq, coordinator_guard);
                     }
                 };
             }
